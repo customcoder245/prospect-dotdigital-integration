@@ -6,16 +6,16 @@ const handleProspectWebhook = async (req, res) => {
         const payload = req.body;
         console.log('Received Prospect Webhook:', JSON.stringify(payload));
 
-        // Prospect Webhooks typically send the event type and entity details
-        // We will parse the payload to determine if it's a contact or sale
+        const action = payload.action || payload.Event;
+        const entityType = payload.entityType;
         
-        // Example check (this will need adjustment based on the exact Prospect payload structure)
-        const eventType = payload.eventType || payload.Event;
-        
-        if (eventType === 'ContactCreated' || eventType === 'ContactUpdated') {
-            await syncContactToDotdigital(payload.data);
-        } else if (eventType === 'SaleCompleted' || eventType === 'OrderCreated') {
-            await syncSaleToDotdigital(payload.data);
+        if (entityType === 'Contact') {
+            // Webhooks use updatedEntity for modifications and typically newEntity/entity for creation
+            const contactData = payload.updatedEntity || payload.newEntity || payload.entity || payload;
+            await syncContactToDotdigital(contactData);
+        } else if (entityType === 'SalesOrderHeader') {
+            const saleData = payload.updatedEntity || payload.newEntity || payload.entity || payload;
+            await syncSaleToDotdigital(saleData);
         }
 
         // Always return 200 OK to acknowledge receipt of the webhook quickly
@@ -29,19 +29,25 @@ const handleProspectWebhook = async (req, res) => {
 const syncContactToDotdigital = async (contactData) => {
     const client = getDotdigitalClient();
     
-    // Map Prospect data fields to Dotdigital schema
+    // Map Prospect data fields to Dotdigital schema (support both camelCase and PascalCase)
+    const email = contactData.Email || contactData.email;
+    if (!email) {
+        console.log('No email found in contact data, skipping Dotdigital sync.');
+        return;
+    }
+
     const dotdigitalContact = {
-        email: contactData.Email,
-        optInType: contactData.OptIn === 1 ? 'VerifiedDouble' : 'Single',
+        email: email,
+        optInType: contactData.optIn === 1 || contactData.OptIn === 1 ? 'VerifiedDouble' : 'Single',
         emailType: 'Html',
         dataFields: [
-            { key: 'FIRSTNAME', value: contactData.Forename || contactData.Salutation || '' },
-            { key: 'LASTNAME', value: contactData.Surname || '' },
-            { key: 'FULLNAME', value: `${contactData.Forename || ''} ${contactData.Surname || ''}`.trim() },
-            { key: 'PHONE', value: contactData.PhoneNumber || '' },
-            { key: 'MOBILEPHONE', value: contactData.MobilePhoneNumber || '' },
-            { key: 'JOBTITLE', value: contactData.JobTitle || '' },
-            { key: 'DEPARTMENT', value: contactData.Department || '' }
+            { key: 'FIRSTNAME', value: contactData.Forename || contactData.forename || contactData.Salutation || contactData.salutation || '' },
+            { key: 'LASTNAME', value: contactData.Surname || contactData.surname || '' },
+            { key: 'FULLNAME', value: `${contactData.Forename || contactData.forename || ''} ${contactData.Surname || contactData.surname || ''}`.trim() },
+            { key: 'PHONE', value: contactData.PhoneNumber || contactData.phoneNumber || '' },
+            { key: 'MOBILEPHONE', value: contactData.MobilePhoneNumber || contactData.mobilePhoneNumber || '' },
+            { key: 'JOBTITLE', value: contactData.JobTitle || contactData.jobTitle || '' },
+            { key: 'DEPARTMENT', value: contactData.Department || contactData.department || '' }
         ]
     };
 
