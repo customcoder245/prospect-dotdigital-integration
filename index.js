@@ -11,6 +11,32 @@ app.get('/health', (req, res) => {
   res.json({ status: 'ok' });
 });
 
+// Import API services
+const { verifyProspectConnection } = require('./services/prospect');
+const { verifyDotdigitalConnection } = require('./services/dotdigital');
+
+// Endpoint: Test API Connections
+app.get('/test-connections', async (req, res) => {
+  try {
+      // Test Dotdigital
+      const dotdigitalTest = await verifyDotdigitalConnection();
+      
+      // Test Prospect
+      const prospectTest = await verifyProspectConnection();
+
+      res.json({
+          status: 'success',
+          message: 'Successfully connected to both APIs Data Sources',
+          connections: {
+              prospect: 'Connected',
+              dotdigital: 'Connected'
+          }
+      });
+  } catch (error) {
+      res.status(500).json({ status: 'error', message: error.message });
+  }
+});
+
 // Future webhook endpoints will be added here
 // app.post('/webhook/prospect', prospectHandler);
 // app.post('/webhook/dotdigital', dotdigitalHandler);
