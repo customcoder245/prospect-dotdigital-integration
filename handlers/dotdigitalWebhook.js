@@ -45,7 +45,7 @@ const syncUnsubscribeToProspect = async (contactInfo) => {
         
         const contacts = searchRes.data.value || searchRes.data;
         if (contacts && contacts.length > 0) {
-            const prospectContactId = contacts[0].Id;
+            const prospectContactId = contacts[0].ContactId || contacts[0].id;
             
             // Step 2: Update the record to reflect unsubscribe status
             // Using standard Prospect OData OptIn and Email flags
