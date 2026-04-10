@@ -32,13 +32,16 @@ const syncContactToDotdigital = async (contactData) => {
     // Map Prospect data fields to Dotdigital schema
     const dotdigitalContact = {
         email: contactData.Email,
-        optInType: 'Single',
+        optInType: contactData.OptIn === 1 ? 'VerifiedDouble' : 'Single',
         emailType: 'Html',
         dataFields: [
-            { key: 'FIRSTNAME', value: contactData.FirstName || '' },
-            { key: 'LASTNAME', value: contactData.LastName || '' },
-            { key: 'FULLNAME', value: contactData.Name || '' },
-            { key: 'COMPANY', value: contactData.CompanyName || '' }
+            { key: 'FIRSTNAME', value: contactData.Forename || contactData.Salutation || '' },
+            { key: 'LASTNAME', value: contactData.Surname || '' },
+            { key: 'FULLNAME', value: `${contactData.Forename || ''} ${contactData.Surname || ''}`.trim() },
+            { key: 'PHONE', value: contactData.PhoneNumber || '' },
+            { key: 'MOBILEPHONE', value: contactData.MobilePhoneNumber || '' },
+            { key: 'JOBTITLE', value: contactData.JobTitle || '' },
+            { key: 'DEPARTMENT', value: contactData.Department || '' }
         ]
     };
 
