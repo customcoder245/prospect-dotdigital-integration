@@ -6,11 +6,21 @@ const handleDotdigitalWebhook = async (req, res) => {
         const payload = req.body;
         console.log('Received Dotdigital Webhook:', JSON.stringify(payload));
 
-        // In Dotdigital, webhooks structure can vary. Example: checking for suppression/unsubscribe
-        const action = payload.action || payload.reason;
+        // Dotdigital webhooks can have different structures depending on if it's an Extension or Global Webhook
+        const action = payload.action || payload.reason || 'Unsubscribed';
         
-        if (action === 'Unsubscribed' || action === 'Suppressed') {
-            await syncUnsubscribeToProspect(payload.suppressedContact);
+        // Extract email dynamically
+        let emailToUnsubscribe = null;
+        if (payload.suppressedContact && payload.suppressedContact.email) {
+            emailToUnsubscribe = payload.suppressedContact.email;
+        } else if (payload.email) {
+            emailToUnsubscribe = payload.email; // From Program Builder Custom Middleware
+        } else if (req.body && req.body.email) {
+            emailToUnsubscribe = req.body.email;
+        }
+        
+        if ((action === 'Unsubscribed' || action === 'Suppressed') && emailToUnsubscribe) {
+            await syncUnsubscribeToProspect({ email: emailToUnsubscribe });
         }
 
         // Acknowledge receipt
