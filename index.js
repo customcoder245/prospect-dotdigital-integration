@@ -4,7 +4,6 @@ const express = require('express');
 const bodyParser = require('body-parser');
 
 const app = express();
-const PORT = process.env.PORT || 3000;
 
 app.use(bodyParser.json());
 
@@ -16,6 +15,12 @@ app.get('/health', (req, res) => {
 // app.post('/webhook/prospect', prospectHandler);
 // app.post('/webhook/dotdigital', dotdigitalHandler);
 
-app.listen(PORT, () => {
-  console.log(`🚀 Server listening on http://localhost:${PORT}`);
-});
+module.exports = app;
+
+// Only listen locally if run directly
+if (require.main === module) {
+  const PORT = process.env.PORT || 3000;
+  app.listen(PORT, () => {
+    console.log(`🚀 Server listening on http://localhost:${PORT}`);
+  });
+}
