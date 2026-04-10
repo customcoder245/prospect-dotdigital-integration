@@ -5,7 +5,11 @@ const bodyParser = require('body-parser');
 
 const app = express();
 
+// Parse standard application/json
 app.use(bodyParser.json());
+
+// Parse Dotdigital's text/json
+app.use(bodyParser.json({ type: 'text/json' }));
 
 app.get('/health', (req, res) => {
   res.json({ status: 'ok' });
