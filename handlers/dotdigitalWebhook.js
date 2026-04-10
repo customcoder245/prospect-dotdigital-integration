@@ -1,0 +1,57 @@
+const { getProspectClient } = require('../services/prospect');
+
+// Handles incoming webhooks from Dotdigital (e.g., Unsubscribes)
+const handleDotdigitalWebhook = async (req, res) => {
+    try {
+        const payload = req.body;
+        console.log('Received Dotdigital Webhook:', JSON.stringify(payload));
+
+        // In Dotdigital, webhooks structure can vary. Example: checking for suppression/unsubscribe
+        const action = payload.action || payload.reason;
+        
+        if (action === 'Unsubscribed' || action === 'Suppressed') {
+            await syncUnsubscribeToProspect(payload.suppressedContact);
+        }
+
+        // Acknowledge receipt
+        res.status(200).json({ status: 'received' });
+    } catch (error) {
+        console.error('Error processing Dotdigital webhook:', error.message);
+        res.status(500).json({ error: 'Failed to process webhook' });
+    }
+};
+
+const syncUnsubscribeToProspect = async (contactInfo) => {
+    const client = getProspectClient();
+    
+    if (!contactInfo || !contactInfo.email) return;
+
+    console.log(`Syncing unsubscribe for ${contactInfo.email} back to Prospect...`);
+    
+    try {
+        // Step 1: Find the contact in Prospect using OData query
+        const queryUrl = `/Contacts?$filter=Email eq '${encodeURIComponent(contactInfo.email)}'`;
+        const searchRes = await client.get(queryUrl);
+        
+        const contacts = searchRes.data.value || searchRes.data;
+        if (contacts && contacts.length > 0) {
+            const prospectContactId = contacts[0].Id;
+            
+            // Step 2: Update the record to reflect unsubscribe status
+            // Example patch (will need to match actual Prospect OData schema for Opt-out flags)
+            await client.patch(`/Contacts('${prospectContactId}')`, {
+                DoNotEmail: true,
+                Unsubscribed: true
+            });
+            console.log(`Successfully unsubscribed ${contactInfo.email} in Prospect.`);
+        } else {
+            console.log(`Contact ${contactInfo.email} not found in Prospect CRM.`);
+        }
+    } catch (err) {
+        console.error('Failed to sync unsubscribe to Prospect:', err.response?.data || err.message);
+    }
+};
+
+module.exports = {
+    handleDotdigitalWebhook
+};
