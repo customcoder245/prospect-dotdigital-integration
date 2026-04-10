@@ -47,13 +47,27 @@ const syncUnsubscribeToProspect = async (contactInfo) => {
         if (contacts && contacts.length > 0) {
             const prospectContactId = contacts[0].ContactId || contacts[0].id;
             
-            // Step 2: Update the record to reflect unsubscribe status
-            // Using standard Prospect OData OptIn and Email flags
-            await client.patch(`/Contacts(${prospectContactId})`, {
-                OptIn: 0,
-                EmailFlag: 0
-            });
-            console.log(`Successfully unsubscribed ${contactInfo.email} in Prospect.`);
+            // Step 2: Update the record with retry logic (handles Prospect row-lock errors)
+            let retries = 3;
+            while (retries > 0) {
+                try {
+                    await client.patch(`/Contacts(${prospectContactId})`, {
+                        OptIn: 0,
+                        EmailFlag: 0
+                    });
+                    console.log(`Successfully unsubscribed ${contactInfo.email} in Prospect.`);
+                    break; // Success - exit retry loop
+                } catch (patchErr) {
+                    const isLockError = patchErr.response?.data?.errors?.[0]?.code === -210;
+                    if (isLockError && retries > 1) {
+                        console.log(`Prospect row locked, retrying in 2s... (${retries - 1} retries left)`);
+                        await new Promise(resolve => setTimeout(resolve, 2000));
+                        retries--;
+                    } else {
+                        throw patchErr; // Re-throw if not a lock error or out of retries
+                    }
+                }
+            }
         } else {
             console.log(`Contact ${contactInfo.email} not found in Prospect CRM.`);
         }
