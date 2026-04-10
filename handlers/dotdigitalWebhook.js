@@ -48,10 +48,10 @@ const syncUnsubscribeToProspect = async (contactInfo) => {
             const prospectContactId = contacts[0].Id;
             
             // Step 2: Update the record to reflect unsubscribe status
-            // Example patch (will need to match actual Prospect OData schema for Opt-out flags)
-            await client.patch(`/Contacts('${prospectContactId}')`, {
-                DoNotEmail: true,
-                Unsubscribed: true
+            // Using standard Prospect OData OptIn and Email flags
+            await client.patch(`/Contacts(${prospectContactId})`, {
+                OptIn: 0,
+                EmailFlag: 0
             });
             console.log(`Successfully unsubscribed ${contactInfo.email} in Prospect.`);
         } else {
