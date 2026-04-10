@@ -10,9 +10,19 @@ const handleProspectWebhook = async (req, res) => {
         const entityType = payload.entityType;
         
         if (entityType === 'Contact') {
-            // Webhooks use updatedEntity for modifications and typically newEntity/entity for creation
             const contactData = payload.updatedEntity || payload.newEntity || payload.entity || payload;
-            await syncContactToDotdigital(contactData);
+            
+            // Prevent infinite loop: skip sync if ONLY EmailFlag/OptIn changed
+            // (that means Prospect was updated BY US from a Dotdigital unsubscribe event)
+            const updatedFields = payload.updatedFields || [];
+            const isOnlyUnsubscribeUpdate = updatedFields.length > 0 &&
+                updatedFields.every(f => ['EmailFlag', 'OptIn', 'MailFlag'].includes(f));
+            
+            if (isOnlyUnsubscribeUpdate) {
+                console.log('Skipping Dotdigital sync - unsubscribe-only update to prevent loop.');
+            } else {
+                await syncContactToDotdigital(contactData);
+            }
         } else if (entityType === 'SalesOrderHeader') {
             const saleData = payload.updatedEntity || payload.newEntity || payload.entity || payload;
             await syncSaleToDotdigital(saleData);
@@ -54,11 +64,24 @@ const syncContactToDotdigital = async (contactData) => {
     console.log(`Syncing contact ${email} to Dotdigital v3...`);
     
     try {
-        // Send to Dotdigital v3 API
+        // Try to create first (POST), if contact already exists use PATCH to update
         await client.post(`/contacts/v3`, dotdigitalContact);
-        console.log('Contact synced successfully');
+        console.log('Contact created successfully in Dotdigital.');
     } catch (err) {
-        console.error('Failed to sync contact to Dotdigital:', err.response?.data || err.message);
+        if (err.response?.data?.errorCode === 'contacts:identifierConflict') {
+            // Contact already exists - update them instead using PATCH by email
+            try {
+                console.log(`Contact exists, updating via PATCH...`);
+                await client.patch(`/contacts/v3/email/${encodeURIComponent(email)}`, {
+                    dataFields: dotdigitalContact.dataFields
+                });
+                console.log('Contact updated successfully in Dotdigital.');
+            } catch (patchErr) {
+                console.error('Failed to update contact in Dotdigital:', patchErr.response?.data || patchErr.message);
+            }
+        } else {
+            console.error('Failed to sync contact to Dotdigital:', err.response?.data || err.message);
+        }
     }
 };
 
