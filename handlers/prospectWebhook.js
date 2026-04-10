@@ -38,8 +38,7 @@ const syncContactToDotdigital = async (contactData) => {
 
     const dotdigitalContact = {
         identifiers: {
-            email: email,
-            mobileNumber: contactData.MobilePhoneNumber || contactData.mobilePhoneNumber || ''
+            email: email
         },
         dataFields: {
             FIRSTNAME: contactData.Forename || contactData.forename || contactData.Salutation || contactData.salutation || '',
@@ -47,16 +46,16 @@ const syncContactToDotdigital = async (contactData) => {
             FULLNAME: `${contactData.Forename || contactData.forename || ''} ${contactData.Surname || contactData.surname || ''}`.trim(),
             PHONE: contactData.PhoneNumber || contactData.phoneNumber || '',
             JOBTITLE: contactData.JobTitle || contactData.jobTitle || '',
-            DEPARTMENT: contactData.Department || contactData.department || ''
+            DEPARTMENT: contactData.Department || contactData.department || '',
+            MOBILEPHONE: contactData.MobilePhoneNumber || contactData.mobilePhoneNumber || ''
         }
     };
 
     console.log(`Syncing contact ${email} to Dotdigital v3...`);
     
     try {
-        // Send to Dotdigital v3 API (Overriding base URL to v3 if necessary)
-        const dotdigitalBase = process.env.DOTDIGITAL_BASE_URL ? process.env.DOTDIGITAL_BASE_URL.replace('/v2', '') : 'https://r3-api.dotdigital.com';
-        await client.post(`${dotdigitalBase}/contacts/v3`, dotdigitalContact);
+        // Send to Dotdigital v3 API
+        await client.post(`/contacts/v3`, dotdigitalContact);
         console.log('Contact synced successfully');
     } catch (err) {
         console.error('Failed to sync contact to Dotdigital:', err.response?.data || err.message);

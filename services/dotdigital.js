@@ -3,7 +3,7 @@ const axios = require('axios');
 // Configure Dotdigital API client
 const getDotdigitalClient = () => {
     return axios.create({
-        baseURL: process.env.DOTDIGITAL_BASE_URL || 'https://r1-api.dotdigital.com/v2',
+        baseURL: process.env.DOTDIGITAL_BASE_URL ? process.env.DOTDIGITAL_BASE_URL.replace('/v2', '').replace('r1-', 'r3-') : 'https://r3-api.dotdigital.com',
         auth: {
             username: process.env.DOTDIGITAL_USERNAME,
             password: process.env.DOTDIGITAL_PASSWORD
