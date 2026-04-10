@@ -37,25 +37,26 @@ const syncContactToDotdigital = async (contactData) => {
     }
 
     const dotdigitalContact = {
-        email: email,
-        optInType: contactData.optIn === 1 || contactData.OptIn === 1 ? 'VerifiedDouble' : 'Single',
-        emailType: 'Html',
-        dataFields: [
-            { key: 'FIRSTNAME', value: contactData.Forename || contactData.forename || contactData.Salutation || contactData.salutation || '' },
-            { key: 'LASTNAME', value: contactData.Surname || contactData.surname || '' },
-            { key: 'FULLNAME', value: `${contactData.Forename || contactData.forename || ''} ${contactData.Surname || contactData.surname || ''}`.trim() },
-            { key: 'PHONE', value: contactData.PhoneNumber || contactData.phoneNumber || '' },
-            { key: 'MOBILEPHONE', value: contactData.MobilePhoneNumber || contactData.mobilePhoneNumber || '' },
-            { key: 'JOBTITLE', value: contactData.JobTitle || contactData.jobTitle || '' },
-            { key: 'DEPARTMENT', value: contactData.Department || contactData.department || '' }
-        ]
+        identifiers: {
+            email: email,
+            mobileNumber: contactData.MobilePhoneNumber || contactData.mobilePhoneNumber || ''
+        },
+        dataFields: {
+            FIRSTNAME: contactData.Forename || contactData.forename || contactData.Salutation || contactData.salutation || '',
+            LASTNAME: contactData.Surname || contactData.surname || '',
+            FULLNAME: `${contactData.Forename || contactData.forename || ''} ${contactData.Surname || contactData.surname || ''}`.trim(),
+            PHONE: contactData.PhoneNumber || contactData.phoneNumber || '',
+            JOBTITLE: contactData.JobTitle || contactData.jobTitle || '',
+            DEPARTMENT: contactData.Department || contactData.department || ''
+        }
     };
 
-    console.log(`Syncing contact ${dotdigitalContact.email} to Dotdigital...`);
+    console.log(`Syncing contact ${email} to Dotdigital v3...`);
     
     try {
-        // Send to Dotdigital API
-        await client.post('/contacts', dotdigitalContact);
+        // Send to Dotdigital v3 API (Overriding base URL to v3 if necessary)
+        const dotdigitalBase = process.env.DOTDIGITAL_BASE_URL ? process.env.DOTDIGITAL_BASE_URL.replace('/v2', '') : 'https://r3-api.dotdigital.com';
+        await client.post(`${dotdigitalBase}/contacts/v3`, dotdigitalContact);
         console.log('Contact synced successfully');
     } catch (err) {
         console.error('Failed to sync contact to Dotdigital:', err.response?.data || err.message);
