@@ -77,5 +77,6 @@ const syncUnsubscribeToProspect = async (contactInfo) => {
 };
 
 module.exports = {
-    handleDotdigitalWebhook
+    handleDotdigitalWebhook,
+    syncUnsubscribeToProspect
 };

@@ -44,10 +44,14 @@ app.get('/test-connections', async (req, res) => {
 // Import Webhook Handlers
 const { handleProspectWebhook } = require('./handlers/prospectWebhook');
 const { handleDotdigitalWebhook } = require('./handlers/dotdigitalWebhook');
+const { handleSuppressionSync } = require('./handlers/suppressionSync');
 
 // Webhook Endpoints
 app.post('/webhook/prospect', handleProspectWebhook);
 app.post('/webhook/dotdigital', handleDotdigitalWebhook);
+
+// Scheduled Sync Endpoints (can be triggered by a Cron job)
+app.get('/sync/suppressed', handleSuppressionSync);
 
 module.exports = app;
 
