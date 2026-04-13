@@ -9,7 +9,7 @@
   "crons": [
     {
       "path": "/sync/suppressed",
-      "schedule": "*/5 * * * *"
+      "schedule": "0 0 * * *"
     }
   ]
 }
