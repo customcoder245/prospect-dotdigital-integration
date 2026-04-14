@@ -4,11 +4,11 @@ const { syncContactToDotdigital } = require('./prospectWebhook');
 // Handler for manual batch sync following OData patterns
 const handleBulkSync = async (req, res) => {
     try {
-        // Optimized for the automated dashboard: Batch of 25 with 400ms delay 
-        // 25 * 0.4s = 10s (Perfect for Vercel Hobby/Pro)
+        // Reduced batch size to 10 to allow for a slower delay (to avoid 429 from Prospect)
+        // 10 contacts * 1 second delay = 10 seconds (Perfect for Vercel)
         const skip = parseInt(req.query.skip, 10) || 0;
-        const top = parseInt(req.query.top, 10) || 25; 
-        
+        const top = parseInt(req.query.top, 10) || 10;
+
         const prospect = getProspectClient();
         console.log(`Starting Batch Sync: Skip ${skip}, Top ${top}...`);
 
@@ -16,12 +16,12 @@ const handleBulkSync = async (req, res) => {
         const prospectUrl = `/Contacts?$top=${top}&$skip=${skip}&$filter=StatusFlag eq 'A'&$expand=Division,MainAddress&$orderby=DateOriginallyCreated desc`;
         const prospectResponse = await prospect.get(prospectUrl);
         let contacts = prospectResponse.data.value || [];
-        
+
         // Safety: Strict slice to ensure we never over-run the batch
         if (contacts.length > top) {
             contacts = contacts.slice(0, top);
         }
-        
+
         console.log(`Starting sync for ${contacts.length} contacts...`);
 
         const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
@@ -31,8 +31,8 @@ const handleBulkSync = async (req, res) => {
         // 2. Process sequentially with safety delay
         for (const contact of contacts) {
             try {
-                // 400ms delay per contact (Total 10s for 25 contacts)
-                await sleep(400); 
+                // 1000ms delay per contact (Total 10s for 10 contacts)
+                await sleep(1000);
                 await syncContactToDotdigital(contact);
                 successCount++;
             } catch (err) {
@@ -45,15 +45,15 @@ const handleBulkSync = async (req, res) => {
         const nextSkip = skip + top;
         const host = req.get('host');
         const protocol = req.protocol;
-        
+
         res.json({
             status: 'success',
             batchRange: `${skip} to ${skip + contacts.length}`,
             contactsProcessed: contacts.length,
             successfullySynced: successCount,
             failed: failCount,
-            nextBatchUrl: contacts.length === top 
-                ? `${protocol}://${host}/sync/bulk-prospect?skip=${nextSkip}&top=${top}` 
+            nextBatchUrl: contacts.length === top
+                ? `${protocol}://${host}/sync/bulk-prospect?skip=${nextSkip}&top=${top}`
                 : "All active contacts processed."
         });
 

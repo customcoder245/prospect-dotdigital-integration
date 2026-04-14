@@ -145,10 +145,10 @@ app.get('/sync/dashboard', (req, res) => {
 
                             if (data.status === 'success') {
                                 totalSynced += data.contactsProcessed;
-                                log(\`✅ Finished \${data.batchRange}. Total Synced: \${totalSynced}\`, 'success');
+                                log(\`✅ Finished \${data.batchRange}. Results: \${data.successfullySynced} ✅ / \${data.failed} ❌. Total Synced: \${totalSynced}\`, 'success');
                                 
                                 if (data.contactsProcessed < top) {
-                                    log('🏆 All records in this range finished.');
+                                    log('🏆 ALL RECORDS IN THIS RANGE FINISHED!');
                                     isRunning = false;
                                     break;
                                 }
