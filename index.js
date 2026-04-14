@@ -106,12 +106,18 @@ app.get('/sync/dashboard', (req, res) => {
                 <button id="stopBtn" onclick="stopSync()" style="background:#f44336; display:none;">PAUSE</button>
 
                 <div id="status" class="status-ready" style="margin-top:20px;">READY</div>
+                <div style="display:flex; gap:20px; font-weight:bold; margin-top:10px;">
+                    <div style="color:#4caf50;">Total Success: <span id="totalSuccess">0</span></div>
+                    <div style="color:#f44336;">Total Failed: <span id="totalFail">0</span></div>
+                </div>
                 <div id="log"></div>
             </div>
 
             <script>
                 let isRunning = false;
                 let totalSynced = 0;
+                let totalSuccess = 0;
+                let totalFail = 0;
                 let currentSkip = 0;
 
                 function log(msg, type = '') {
@@ -145,10 +151,16 @@ app.get('/sync/dashboard', (req, res) => {
 
                             if (data.status === 'success') {
                                 totalSynced += data.contactsProcessed;
-                                log(\`✅ Finished \${data.batchRange}. Results: \${data.successfullySynced} ✅ / \${data.failed} ❌. Total Synced: \${totalSynced}\`, 'success');
+                                totalSuccess += data.successfullySynced;
+                                totalFail += data.failed;
+                                
+                                document.getElementById('totalSuccess').innerText = totalSuccess;
+                                document.getElementById('totalFail').innerText = totalFail;
+                                
+                                log(\`✅ Finished \${data.batchRange}. Batch: \${data.successfullySynced} ✅ / \${data.failed} ❌. Total: \${totalSynced}\`, 'success');
                                 
                                 if (data.contactsProcessed < top) {
-                                    log('🏆 ALL RECORDS IN THIS RANGE FINISHED!');
+                                    log('🏆 All records in this range finished.');
                                     isRunning = false;
                                     break;
                                 }
