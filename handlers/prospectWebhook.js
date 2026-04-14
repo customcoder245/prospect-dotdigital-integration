@@ -92,5 +92,7 @@ const syncSaleToDotdigital = async (saleData) => {
 };
 
 module.exports = {
-    handleProspectWebhook
+    handleProspectWebhook,
+    syncContactToDotdigital,
+    syncSaleToDotdigital
 };
