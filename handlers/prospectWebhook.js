@@ -1,5 +1,5 @@
 const { getDotdigitalClient } = require('../services/dotdigital');
-const { getContact, getOrderLines } = require('../services/prospect');
+const { getContact, getDivision, getAddress, getOrderLines } = require('../services/prospect');
 
 // Handles incoming webhooks from Prospect CRM
 const handleProspectWebhook = async (req, res) => {
@@ -43,6 +43,41 @@ const syncContactToDotdigital = async (contactData) => {
         return;
     }
 
+    // Capture IDs for extra data fetching
+    const divisionId = contactData.DivisionId || contactData.divisionId;
+    const addressId = contactData.AddressId || contactData.addressId;
+    
+    let companyName = contactData.CompanyName || contactData.DivisionName || '';
+    let addressLine1 = contactData.AddressLine1 || '';
+    let addressLine2 = contactData.AddressLine2 || '';
+    let town = contactData.Town || '';
+    let state = contactData.County || contactData.State || '';
+    let postcode = contactData.Postcode || '';
+
+    // If Company name is missing, fetch it
+    if (!companyName && divisionId) {
+        try {
+            const division = await getDivision(divisionId);
+            companyName = division.DivisionName;
+        } catch (err) {
+            console.error('Failed to fetch Division info:', err.message);
+        }
+    }
+
+    // If Address is missing, fetch it
+    if (!addressLine1 && addressId) {
+        try {
+            const address = await getAddress(addressId);
+            addressLine1 = address.AddressLine1;
+            addressLine2 = address.AddressLine2;
+            town = address.Town;
+            state = address.County; 
+            postcode = address.Postcode;
+        } catch (err) {
+            console.error('Failed to fetch Address info:', err.message);
+        }
+    }
+
     const dotdigitalContact = {
         identifiers: { email: email },
         dataFields: {
@@ -53,12 +88,12 @@ const syncContactToDotdigital = async (contactData) => {
             JOBTITLE: contactData.JobTitle || contactData.jobTitle || '',
             DEPARTMENT: contactData.Department || contactData.department || '',
             MOBILEPHONE: contactData.MobilePhoneNumber || contactData.mobilePhoneNumber || '',
-            COMPANY: contactData.CompanyName || contactData.DivisionName || '',
-            ADDRESS1: contactData.AddressLine1 || '',
-            ADDRESS2: contactData.AddressLine2 || '',
-            TOWN: contactData.Town || '',
-            STATE: contactData.County || contactData.State || '',
-            POSTCODE: contactData.Postcode || '',
+            COMPANY: companyName,
+            ADDRESS1: addressLine1,
+            ADDRESS2: addressLine2,
+            TOWN: town,
+            STATE: state,
+            POSTCODE: postcode,
             INDUSTRY: contactData.IndustryName || contactData.Industry || '',
             ACCOUNTMANAGER: contactData.AccountManagerName || contactData.AccountManager || ''
         }
@@ -92,17 +127,11 @@ const syncSaleToDotdigital = async (saleData) => {
         const orderId = saleData.SalesOrderHeaderId || saleData.salesOrderHeaderId;
         const contactId = saleData.ContactId || saleData.contactId;
 
-        if (!orderId || !contactId) {
-            console.log('Missing OrderId or ContactId, skipping sale sync.');
-            return;
-        }
+        if (!orderId || !contactId) return;
 
         const contact = await getContact(contactId);
         const email = contact.Email || contact.email;
-        if (!email) {
-            console.log('No email found for contact, cannot sync sale to Dotdigital.');
-            return;
-        }
+        if (!email) return;
 
         const lines = await getOrderLines(orderId);
         const skus = lines.map(line => line.ProductCode || line.productCode || 'Unknown').join(', ');

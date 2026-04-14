@@ -5,15 +5,18 @@ const { syncContactToDotdigital } = require('./prospectWebhook');
 // Handler for bulk syncing all Prospect contacts to Dotdigital
 const handleBulkSync = async (req, res) => {
     try {
-        const client = getProspectClient();
-        console.log('Starting Bulk Sync from Prospect to Dotdigital...');
+        // Support pagination for batch processing
+        const skip = parseInt(req.query.skip) || 0;
+        const top = parseInt(req.query.top) || 20; // Default to 20 to avoid timeouts
         
-        // Fetch all active contacts from Prospect
-        // We can add a filter here if needed, e.g., $filter=DateOriginallyCreated ge 2025-07-01T00:00:00Z
-        const response = await client.get('/Contacts?$filter=StatusFlag eq \'A\'');
+        const client = getProspectClient();
+        console.log(`Starting Bulk Sync from Prospect to Dotdigital (Skip: ${skip}, Top: ${top})...`);
+        
+        // Fetch active contacts with pagination to avoid timeouts
+        const response = await client.get(`/Contacts?$filter=StatusFlag eq 'A'&$skip=${skip}&$top=${top}&$orderby=DateOriginallyCreated desc`);
         const contacts = response.data.value || [];
         
-        console.log(`Found ${contacts.length} active contacts in Prospect. Starting batch processing...`);
+        console.log(`Found ${contacts.length} active contacts in this batch. Starting batch processing...`);
         
         // Function to create a delay
         const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
@@ -24,8 +27,9 @@ const handleBulkSync = async (req, res) => {
         // Process in small batches to avoid hitting rate limits
         for (const contact of contacts) {
             try {
-                // Add a small delay (500ms) between each request to prevent 429 errors
-                await sleep(500); 
+                // Add a delay (1000ms) between each request to prevent 429 errors
+                // since we also fetch Address and Company details now.
+                await sleep(1000); 
                 
                 await syncContactToDotdigital(contact);
                 successCount++;
@@ -37,9 +41,11 @@ const handleBulkSync = async (req, res) => {
 
         res.json({
             status: 'success',
-            totalFound: contacts.length,
+            batch: { skip, top },
+            processed: contacts.length,
             successfullySynced: successCount,
-            failed: failCount
+            failed: failCount,
+            nextBatchUrl: contacts.length === top ? `https://${req.get('host')}/sync/bulk-prospect?skip=${skip + top}&top=${top}` : "All items in range processed"
         });
     } catch (error) {
         console.error('Bulk Sync Error:', error.message);

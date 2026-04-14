@@ -34,6 +34,20 @@ const getContact = async (id) => {
     return response.data;
 };
 
+// Function: Get division (Company) details
+const getDivision = async (id) => {
+    const client = getProspectClient();
+    const response = await client.get(`/Divisions(DivisionId=${id})`);
+    return response.data;
+};
+
+// Function: Get address details
+const getAddress = async (id) => {
+    const client = getProspectClient();
+    const response = await client.get(`/Addresses(AddressId=${id})`);
+    return response.data;
+};
+
 // Function: Get order lines for a sales order
 const getOrderLines = async (orderId) => {
     const client = getProspectClient();
@@ -45,5 +59,7 @@ module.exports = {
     getProspectClient,
     verifyProspectConnection,
     getContact,
+    getDivision,
+    getAddress,
     getOrderLines
 };
