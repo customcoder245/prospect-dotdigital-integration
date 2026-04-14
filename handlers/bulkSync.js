@@ -1,55 +1,68 @@
-const axios = require('axios');
 const { getProspectClient } = require('../services/prospect');
-const { syncContactToDotdigital } = require('./prospectWebhook');
+const { getDotdigitalClient } = require('../services/dotdigital');
 
-// Handler for bulk syncing all Prospect contacts to Dotdigital
+// Handler for high-performance bulk sync
 const handleBulkSync = async (req, res) => {
     try {
-        // Support pagination for batch processing
-        const skip = parseInt(req.query.skip) || 0;
-        const top = parseInt(req.query.top) || 20; // Default to 20 to avoid timeouts
+        const prospect = getProspectClient();
+        const dotdigital = getDotdigitalClient();
         
-        const client = getProspectClient();
-        console.log(`Starting Bulk Sync from Prospect to Dotdigital (Skip: ${skip}, Top: ${top})...`);
-        
-        // Fetch active contacts with pagination to avoid timeouts
-        const response = await client.get(`/Contacts?$filter=StatusFlag eq 'A'&$skip=${skip}&$top=${top}&$orderby=DateOriginallyCreated desc`);
-        const contacts = response.data.value || [];
-        
-        console.log(`Found ${contacts.length} active contacts in this batch. Starting batch processing...`);
-        
-        // Function to create a delay
-        const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
-        
-        let successCount = 0;
-        let failCount = 0;
+        console.log('Starting high-performance Bulk Sync...');
 
-        // Process in small batches to avoid hitting rate limits
-        for (const contact of contacts) {
-            try {
-                // Add a delay (1000ms) between each request to prevent 429 errors
-                // since we also fetch Address and Company details now.
-                await sleep(1000); 
-                
-                await syncContactToDotdigital(contact);
-                successCount++;
-            } catch (err) {
-                console.error(`Failed to sync contact ${contact.Email}:`, err.message);
-                failCount++;
-            }
-        }
+        // 1. Fetch ALL active contacts with Company and Address expanded in ONE call
+        // This is much faster than fetching them one by one.
+        const prospectResponse = await prospect.get('/Contacts?$filter=StatusFlag eq \'A\'&$expand=Division,MainAddress');
+        const contacts = prospectResponse.data.value || [];
+        
+        console.log(`Found ${contacts.length} contacts. Formatting for bulk import...`);
+
+        // 2. Format contacts for Dotdigital v2 Bulk Import
+        const formattedContacts = contacts.map(c => {
+            const email = c.Email || c.email;
+            if (!email) return null;
+
+            return {
+                email: email,
+                optInType: 'Unknown',
+                emailType: 'Html',
+                dataFields: [
+                    { key: 'FIRSTNAME', value: c.Forename || c.Salutation || '' },
+                    { key: 'LASTNAME', value: c.Surname || '' },
+                    { key: 'FULLNAME', value: `${c.Forename || ''} ${c.Surname || ''}`.trim() },
+                    { key: 'PHONE', value: c.PhoneNumber || '' },
+                    { key: 'JOBTITLE', value: c.JobTitle || '' },
+                    { key: 'DEPARTMENT', value: c.Department || '' },
+                    { key: 'MOBILEPHONE', value: c.MobilePhoneNumber || '' },
+                    { key: 'COMPANY', value: c.Division?.DivisionName || '' },
+                    { key: 'ADDRESS1', value: c.MainAddress?.AddressLine1 || '' },
+                    { key: 'ADDRESS2', value: c.MainAddress?.AddressLine2 || '' },
+                    { key: 'TOWN', value: c.MainAddress?.Town || '' },
+                    { key: 'STATE', value: c.MainAddress?.County || '' },
+                    { key: 'POSTCODE', value: c.MainAddress?.Postcode || '' },
+                    { key: 'INDUSTRY', value: c.IndustryName || '' },
+                    { key: 'ACCOUNTMANAGER', value: c.AccountManagerName || '' }
+                ]
+            };
+        }).filter(c => c !== null);
+
+        // 3. Send to Dotdigital v2 Bulk Import (Handles up to 50,000 contacts at once)
+        console.log(`Sending ${formattedContacts.length} contacts to Dotdigital Bulk Import...`);
+        const ddResponse = await dotdigital.post('/v2/contacts/import', formattedContacts);
 
         res.json({
             status: 'success',
-            batch: { skip, top },
-            processed: contacts.length,
-            successfullySynced: successCount,
-            failed: failCount,
-            nextBatchUrl: contacts.length === top ? `https://${req.get('host')}/sync/bulk-prospect?skip=${skip + top}&top=${top}` : "All items in range processed"
+            message: 'Bulk import task created in Dotdigital.',
+            contactsProcessed: formattedContacts.length,
+            importId: ddResponse.data.id
         });
+
     } catch (error) {
-        console.error('Bulk Sync Error:', error.message);
-        res.status(500).json({ status: 'error', message: error.message });
+        console.error('Bulk Sync Error:', error.response?.data || error.message);
+        res.status(500).json({ 
+            status: 'error', 
+            message: error.message,
+            details: error.response?.data
+        });
     }
 };
 
