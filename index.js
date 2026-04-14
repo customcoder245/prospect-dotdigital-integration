@@ -92,13 +92,17 @@ app.get('/sync/dashboard', (req, res) => {
                         <label>Batch Size (Top):</label><br>
                         <input type="number" id="top" value="25" style="padding: 8px; width: 80px;">
                     </div>
+                    <div>
+                        <label>Turbo Mode (Workers):</label><br>
+                        <input type="number" id="concurrency" value="8" style="padding: 8px; width: 60px;">
+                    </div>
                 </div>
 
                 <div class="progress-bg">
                     <div id="progressBar" class="progress-bar"></div>
                 </div>
                 
-                <button id="startBtn" onclick="startSync()">START AUTOMATED SYNC</button>
+                <button id="startBtn" onclick="startSync()">START TURBO SYNC</button>
                 <button id="stopBtn" onclick="stopSync()" style="background:#f44336; display:none;">PAUSE</button>
 
                 <div id="status" class="status-ready" style="margin-top:20px;">READY</div>
@@ -108,6 +112,7 @@ app.get('/sync/dashboard', (req, res) => {
             <script>
                 let isRunning = false;
                 let totalSynced = 0;
+                let currentSkip = 0;
 
                 function log(msg, type = '') {
                     const logEl = document.getElementById('log');
@@ -122,12 +127,48 @@ app.get('/sync/dashboard', (req, res) => {
 
                 function stopSync() { 
                     isRunning = false; 
-                    log('Pausing sync... will stop after current batch.');
+                    log('Pausing sync... will stop after current active batches finish.');
+                }
+
+                async function runWorker(top) {
+                    while (isRunning) {
+                        const mySkip = currentSkip;
+                        currentSkip += top;
+                        document.getElementById('skip').value = currentSkip;
+
+                        try {
+                            const url = \`/sync/bulk-prospect?skip=\${mySkip}&top=\${top}\`;
+                            log(\`Worker starting range \${mySkip} to \${mySkip + top}...\`);
+                            
+                            const response = await fetch(url);
+                            const data = await response.json();
+
+                            if (data.status === 'success') {
+                                totalSynced += data.contactsProcessed;
+                                log(\`✅ Finished \${data.batchRange}. Total Synced: \${totalSynced}\`, 'success');
+                                
+                                if (data.contactsProcessed < top) {
+                                    log('🏆 All records in this range finished.');
+                                    isRunning = false;
+                                    break;
+                                }
+                            } else {
+                                throw new Error(data.message || 'Unknown error');
+                            }
+                        } catch (err) {
+                            log(\`❌ Error at skip \${mySkip}: \${err.message}\`, 'error');
+                            log('Retrying this range in 10 seconds...', 'error');
+                            currentSkip -= top; // Return the range to the pool
+                            await new Promise(r => setTimeout(r, 10000));
+                        }
+                    }
                 }
 
                 async function startSync() {
-                    let skip = parseInt(document.getElementById('skip').value);
+                    currentSkip = parseInt(document.getElementById('skip').value);
                     const top = parseInt(document.getElementById('top').value);
+                    const concurrency = parseInt(document.getElementById('concurrency').value);
+                    
                     const btn = document.getElementById('startBtn');
                     const stopBtn = document.getElementById('stopBtn');
                     const statusEl = document.getElementById('status');
@@ -135,51 +176,27 @@ app.get('/sync/dashboard', (req, res) => {
                     isRunning = true;
                     btn.disabled = true;
                     stopBtn.style.display = 'inline-block';
-                    statusEl.innerText = 'SYNCING...';
+                    statusEl.innerText = 'TURBO SYNCING...';
                     statusEl.className = 'status-running';
-                    log('🚀 Automated sync started.');
+                    log(\`🚀 Turbo sync started with \${concurrency} parallel workers.\`);
 
-                    while (isRunning) {
-                        try {
-                            const url = \`/sync/bulk-prospect?skip=\${skip}&top=\${top}\`;
-                            
-                            const response = await fetch(url);
-                            const data = await response.json();
-
-                            if (data.status === 'success') {
-                                totalSynced += data.contactsProcessed;
-                                log(\`✅ Synced records \${data.batchRange}. Batch Sync Result: \${data.successfullySynced} Success, \${data.failed} Fail.\`, 'success');
-                                
-                                if (data.nextBatchUrl === 'All active contacts processed.' || data.contactsProcessed === 0) {
-                                    log('🏆 ALL CONTACTS SYNCED SUCCESSFULLY!');
-                                    statusEl.innerText = 'COMPLETE';
-                                    statusEl.className = 'status-complete';
-                                    isRunning = false;
-                                    break;
-                                }
-                                
-                                skip += top;
-                                document.getElementById('skip').value = skip;
-                                // Small cooldown for the browser
-                                await new Promise(r => setTimeout(r, 500));
-                            } else {
-                                throw new Error(data.message || 'Unknown error');
-                            }
-                        } catch (err) {
-                            log(\`❌ Error at skip \${skip}: \${err.message}\`, 'error');
-                            log('Retrying in 5 seconds...', 'error');
-                            await new Promise(r => setTimeout(r, 5000));
-                        }
-                        
-                        if (!isRunning) {
-                            statusEl.innerText = 'PAUSED';
-                            statusEl.className = 'status-ready';
-                            break;
-                        }
+                    // Start parallel workers
+                    const workers = [];
+                    for (let i = 0; i < concurrency; i++) {
+                        workers.push(runWorker(top));
                     }
+
+                    await Promise.all(workers);
 
                     btn.disabled = false;
                     stopBtn.style.display = 'none';
+                    if (!isRunning && statusEl.innerText !== 'COMPLETE') {
+                        statusEl.innerText = 'PAUSED';
+                        statusEl.className = 'status-ready';
+                    } else {
+                        statusEl.innerText = 'COMPLETE';
+                        statusEl.className = 'status-complete';
+                    }
                 }
             </script>
         </body>
