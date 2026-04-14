@@ -47,14 +47,15 @@ const syncContactToDotdigital = async (contactData) => {
     const divisionId = contactData.DivisionId || contactData.divisionId;
     const addressId = contactData.AddressId || contactData.addressId;
     
-    let companyName = contactData.CompanyName || contactData.DivisionName || '';
-    let addressLine1 = contactData.AddressLine1 || '';
-    let addressLine2 = contactData.AddressLine2 || '';
-    let town = contactData.Town || '';
-    let state = contactData.County || contactData.State || '';
-    let postcode = contactData.Postcode || '';
+    // Check if data was already provided (e.g. via OData $expand in bulk sync)
+    let companyName = contactData.Division?.DivisionName || contactData.CompanyName || contactData.DivisionName || '';
+    let addressLine1 = contactData.MainAddress?.AddressLine1 || contactData.AddressLine1 || '';
+    let addressLine2 = contactData.MainAddress?.AddressLine2 || contactData.AddressLine2 || '';
+    let town = contactData.MainAddress?.Town || contactData.Town || '';
+    let state = contactData.MainAddress?.County || contactData.County || contactData.State || '';
+    let postcode = contactData.MainAddress?.Postcode || contactData.Postcode || '';
 
-    // If Company name is missing, fetch it
+    // If Company name is still missing, fetch it
     if (!companyName && divisionId) {
         try {
             const division = await getDivision(divisionId);
@@ -64,7 +65,7 @@ const syncContactToDotdigital = async (contactData) => {
         }
     }
 
-    // If Address is missing, fetch it
+    // If Address is still missing, fetch it
     if (!addressLine1 && addressId) {
         try {
             const address = await getAddress(addressId);

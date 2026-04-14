@@ -4,19 +4,20 @@ const { syncContactToDotdigital } = require('./prospectWebhook');
 // Handler for manual batch sync following OData patterns
 const handleBulkSync = async (req, res) => {
     try {
-        // Parse pagination from query parameters
+        // Reduced batch size to 25 to ensure it finishes within Vercel's 10s limit
         const skip = parseInt(req.query.skip, 10) || 0;
-        const top = parseInt(req.query.top, 10) || 100;
+        const top = parseInt(req.query.top, 10) || 25; 
         
         const prospect = getProspectClient();
-        console.log(`Executing sync batch: Skip=${skip}, Top=${top}`);
+        console.log(`Starting Batch Sync: Skip ${skip}, Top ${top}...`);
 
-        // 1. Fetch contacts with expanded details from Prospect
+        // 1. Fetch contacts with expanded details (Division, MainAddress)
+        // This makes the sync VERY fast because we have all data in 1 request.
         const prospectUrl = `/Contacts?$top=${top}&$skip=${skip}&$filter=StatusFlag eq 'A'&$expand=Division,MainAddress&$orderby=DateOriginallyCreated desc`;
         const prospectResponse = await prospect.get(prospectUrl);
         let contacts = prospectResponse.data.value || [];
         
-        // Ensure we don't exceed the batch size even if API ignores $top
+        // Safety: Strict slice to ensure we never over-run the batch
         if (contacts.length > top) {
             contacts = contacts.slice(0, top);
         }
@@ -30,8 +31,8 @@ const handleBulkSync = async (req, res) => {
         // 2. Process sequentially with safety delay
         for (const contact of contacts) {
             try {
-                // 500ms delay per contact to avoid 429 errors
-                await sleep(500); 
+                // 300ms delay per contact (Total 7.5s for 25 contacts)
+                await sleep(300); 
                 await syncContactToDotdigital(contact);
                 successCount++;
             } catch (err) {
