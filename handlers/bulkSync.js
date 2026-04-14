@@ -25,23 +25,23 @@ const handleBulkSync = async (req, res) => {
                 email: email,
                 optInType: 'Unknown',
                 emailType: 'Html',
-                dataFields: [
-                    { key: 'FIRSTNAME', value: c.Forename || c.Salutation || '' },
-                    { key: 'LASTNAME', value: c.Surname || '' },
-                    { key: 'FULLNAME', value: `${c.Forename || ''} ${c.Surname || ''}`.trim() },
-                    { key: 'PHONE', value: c.PhoneNumber || '' },
-                    { key: 'JOBTITLE', value: c.JobTitle || '' },
-                    { key: 'DEPARTMENT', value: c.Department || '' },
-                    { key: 'MOBILEPHONE', value: c.MobilePhoneNumber || '' },
-                    { key: 'COMPANY', value: c.Division?.DivisionName || '' },
-                    { key: 'ADDRESS1', value: c.MainAddress?.AddressLine1 || '' },
-                    { key: 'ADDRESS2', value: c.MainAddress?.AddressLine2 || '' },
-                    { key: 'TOWN', value: c.MainAddress?.Town || '' },
-                    { key: 'STATE', value: c.MainAddress?.County || '' },
-                    { key: 'POSTCODE', value: c.MainAddress?.Postcode || '' },
-                    { key: 'INDUSTRY', value: c.IndustryName || '' },
-                    { key: 'ACCOUNTMANAGER', value: c.AccountManagerName || '' }
-                ]
+                dataFields: {
+                    FIRSTNAME: c.Forename || c.Salutation || '',
+                    LASTNAME: c.Surname || '',
+                    FULLNAME: `${c.Forename || ''} ${c.Surname || ''}`.trim(),
+                    PHONE: c.PhoneNumber || '',
+                    JOBTITLE: c.JobTitle || '',
+                    DEPARTMENT: c.Department || '',
+                    MOBILEPHONE: c.MobilePhoneNumber || '',
+                    COMPANY: c.Division?.DivisionName || '',
+                    ADDRESS1: c.MainAddress?.AddressLine1 || '',
+                    ADDRESS2: c.MainAddress?.AddressLine2 || '',
+                    TOWN: c.MainAddress?.Town || '',
+                    STATE: c.MainAddress?.County || '',
+                    POSTCODE: c.MainAddress?.Postcode || '',
+                    INDUSTRY: c.IndustryName || '',
+                    ACCOUNTMANAGER: c.AccountManagerName || ''
+                }
             };
         }).filter(c => c !== null);
 
