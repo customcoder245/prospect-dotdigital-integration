@@ -77,10 +77,11 @@ const syncContactToDotdigital = async (contactData) => {
                 });
                 console.log('Contact updated successfully in Dotdigital.');
             } catch (patchErr) {
-                console.error('Failed to update contact in Dotdigital:', patchErr.response?.data || patchErr.message);
+                throw patchErr;
             }
         } else {
             console.error('Failed to sync contact to Dotdigital:', err.response?.data || err.message);
+            throw err;
         }
     }
 };

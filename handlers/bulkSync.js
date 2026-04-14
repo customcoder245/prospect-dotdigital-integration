@@ -15,12 +15,18 @@ const handleBulkSync = async (req, res) => {
         
         console.log(`Found ${contacts.length} active contacts in Prospect. Starting batch processing...`);
         
+        // Function to create a delay
+        const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
+        
         let successCount = 0;
         let failCount = 0;
 
         // Process in small batches to avoid hitting rate limits
         for (const contact of contacts) {
             try {
+                // Add a small delay (500ms) between each request to prevent 429 errors
+                await sleep(500); 
+                
                 await syncContactToDotdigital(contact);
                 successCount++;
             } catch (err) {
