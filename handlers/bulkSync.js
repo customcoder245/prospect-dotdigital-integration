@@ -4,20 +4,24 @@ const { syncContactToDotdigital } = require('./prospectWebhook');
 // Handler for manual batch sync
 const handleBulkSync = async (req, res) => {
     try {
-        const skip = parseInt(req.query.skip) || 0;
-        const top = parseInt(req.query.top) || 100;
+        const skip = parseInt(req.query.skip, 10) || 0;
+        const top = parseInt(req.query.top, 10) || 100;
         
         const prospect = getProspectClient();
-        console.log(`Starting Batch Sync: Skip ${skip}, Top ${top}...`);
+        console.log(`[DEBUG] Received Request - Skip: ${skip}, Top: ${top}`);
 
         // 1. Fetch contacts with expanded details in ONE call 
-        // We put $top and $skip at the start to ensure Prospect respects them
         const prospectUrl = `/Contacts?$top=${top}&$skip=${skip}&$filter=StatusFlag eq 'A'&$expand=Division,MainAddress&$orderby=DateOriginallyCreated desc`;
+        console.log(`[DEBUG] Prospect API URL: ${prospectUrl}`);
+        
         const prospectResponse = await prospect.get(prospectUrl);
         let contacts = prospectResponse.data.value || [];
         
+        console.log(`[DEBUG] Prospect returned ${contacts.length} records.`);
+        
         // Safety: Manual slice to ENSURE we never process more than requested
         if (contacts.length > top) {
+            console.log(`[DEBUG] Slicing contacts from ${contacts.length} to ${top}`);
             contacts = contacts.slice(0, top);
         }
         
