@@ -1,43 +1,37 @@
 const { getProspectClient } = require('../services/prospect');
 const { syncContactToDotdigital } = require('./prospectWebhook');
 
-// Handler for manual batch sync
+// Handler for manual batch sync following OData patterns
 const handleBulkSync = async (req, res) => {
     try {
+        // Parse pagination from query parameters
         const skip = parseInt(req.query.skip, 10) || 0;
         const top = parseInt(req.query.top, 10) || 100;
         
         const prospect = getProspectClient();
-        console.log(`[DEBUG] Received Request - Skip: ${skip}, Top: ${top}`);
+        console.log(`Executing sync batch: Skip=${skip}, Top=${top}`);
 
-        // 1. Fetch contacts with expanded details in ONE call 
+        // 1. Fetch contacts with expanded details from Prospect
         const prospectUrl = `/Contacts?$top=${top}&$skip=${skip}&$filter=StatusFlag eq 'A'&$expand=Division,MainAddress&$orderby=DateOriginallyCreated desc`;
-        console.log(`[DEBUG] Prospect API URL: ${prospectUrl}`);
-        
         const prospectResponse = await prospect.get(prospectUrl);
         let contacts = prospectResponse.data.value || [];
         
-        console.log(`[DEBUG] Prospect returned ${contacts.length} records.`);
-        
-        // Safety: Manual slice to ENSURE we never process more than requested
+        // Ensure we don't exceed the batch size even if API ignores $top
         if (contacts.length > top) {
-            console.log(`[DEBUG] Slicing contacts from ${contacts.length} to ${top}`);
             contacts = contacts.slice(0, top);
         }
         
-        console.log(`Found ${contacts.length} contacts for this batch. Starting...`);
+        console.log(`Starting sync for ${contacts.length} contacts...`);
 
         const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
         let successCount = 0;
         let failCount = 0;
 
-        // 2. Process sequentially with 500ms delay
+        // 2. Process sequentially with safety delay
         for (const contact of contacts) {
             try {
-                // Add a small delay to avoid 429
+                // 500ms delay per contact to avoid 429 errors
                 await sleep(500); 
-                
-                // Note: syncContactToDotdigital is smart enough to use the expanded data
                 await syncContactToDotdigital(contact);
                 successCount++;
             } catch (err) {
@@ -46,19 +40,20 @@ const handleBulkSync = async (req, res) => {
             }
         }
 
-        const nextLink = prospectResponse.data['@odata.nextLink'];
-        if (nextLink) {
-            console.log(`[DEBUG] Prospect provided next link: ${nextLink}`);
-        }
-
+        // 3. Return progress and the URL for the next batch
+        const nextSkip = skip + top;
+        const host = req.get('host');
+        const protocol = req.protocol;
+        
         res.json({
             status: 'success',
-            batch: { skip, top },
-            processed: contacts.length,
+            batchRange: `${skip} to ${skip + contacts.length}`,
+            contactsProcessed: contacts.length,
             successfullySynced: successCount,
             failed: failCount,
-            hasMore: !!nextLink,
-            nextBatchUrl: nextLink ? `https://${req.get('host')}/sync/bulk-prospect?skip=${skip + top}&top=${top}` : "All items processed"
+            nextBatchUrl: contacts.length === top 
+                ? `${protocol}://${host}/sync/bulk-prospect?skip=${nextSkip}&top=${top}` 
+                : "All active contacts processed."
         });
 
     } catch (error) {
