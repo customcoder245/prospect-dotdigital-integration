@@ -46,13 +46,19 @@ const handleBulkSync = async (req, res) => {
             }
         }
 
+        const nextLink = prospectResponse.data['@odata.nextLink'];
+        if (nextLink) {
+            console.log(`[DEBUG] Prospect provided next link: ${nextLink}`);
+        }
+
         res.json({
             status: 'success',
             batch: { skip, top },
             processed: contacts.length,
             successfullySynced: successCount,
             failed: failCount,
-            nextBatchUrl: contacts.length === top ? `https://${req.get('host')}/sync/bulk-prospect?skip=${skip + top}&top=${top}` : "Finished"
+            hasMore: !!nextLink,
+            nextBatchUrl: nextLink ? `https://${req.get('host')}/sync/bulk-prospect?skip=${skip + top}&top=${top}` : "All items processed"
         });
 
     } catch (error) {
