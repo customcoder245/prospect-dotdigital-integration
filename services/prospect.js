@@ -27,7 +27,23 @@ const verifyProspectConnection = async () => {
     }
 };
 
+// Function: Get a single contact by ID
+const getContact = async (id) => {
+    const client = getProspectClient();
+    const response = await client.get(`/Contacts(ContactId=${id})`);
+    return response.data;
+};
+
+// Function: Get order lines for a sales order
+const getOrderLines = async (orderId) => {
+    const client = getProspectClient();
+    const response = await client.get(`/SalesOrderLines?$filter=SalesOrderHeaderId eq ${orderId}`);
+    return response.data.value || [];
+};
+
 module.exports = {
     getProspectClient,
-    verifyProspectConnection
+    verifyProspectConnection,
+    getContact,
+    getOrderLines
 };

@@ -1,4 +1,5 @@
 const { getDotdigitalClient } = require('../services/dotdigital');
+const { getContact, getOrderLines } = require('../services/prospect');
 
 // Handles incoming webhooks from Prospect CRM
 const handleProspectWebhook = async (req, res) => {
@@ -13,7 +14,6 @@ const handleProspectWebhook = async (req, res) => {
             const contactData = payload.updatedEntity || payload.newEntity || payload.entity || payload;
             
             // Prevent infinite loop: skip sync if ONLY EmailFlag/OptIn changed
-            // (that means Prospect was updated BY US from a Dotdigital unsubscribe event)
             const updatedFields = payload.updatedFields || [];
             const isOnlyUnsubscribeUpdate = updatedFields.length > 0 &&
                 updatedFields.every(f => ['EmailFlag', 'OptIn', 'MailFlag'].includes(f));
@@ -28,7 +28,6 @@ const handleProspectWebhook = async (req, res) => {
             await syncSaleToDotdigital(saleData);
         }
 
-        // Always return 200 OK to acknowledge receipt of the webhook quickly
         res.status(200).json({ status: 'received' });
     } catch (error) {
         console.error('Error processing Prospect webhook:', error.message);
@@ -38,8 +37,6 @@ const handleProspectWebhook = async (req, res) => {
 
 const syncContactToDotdigital = async (contactData) => {
     const client = getDotdigitalClient();
-    
-    // Map Prospect data fields to Dotdigital schema (support both camelCase and PascalCase)
     const email = contactData.Email || contactData.email;
     if (!email) {
         console.log('No email found in contact data, skipping Dotdigital sync.');
@@ -47,9 +44,7 @@ const syncContactToDotdigital = async (contactData) => {
     }
 
     const dotdigitalContact = {
-        identifiers: {
-            email: email
-        },
+        identifiers: { email: email },
         dataFields: {
             FIRSTNAME: contactData.Forename || contactData.forename || contactData.Salutation || contactData.salutation || '',
             LASTNAME: contactData.Surname || contactData.surname || '',
@@ -57,19 +52,25 @@ const syncContactToDotdigital = async (contactData) => {
             PHONE: contactData.PhoneNumber || contactData.phoneNumber || '',
             JOBTITLE: contactData.JobTitle || contactData.jobTitle || '',
             DEPARTMENT: contactData.Department || contactData.department || '',
-            MOBILEPHONE: contactData.MobilePhoneNumber || contactData.mobilePhoneNumber || ''
+            MOBILEPHONE: contactData.MobilePhoneNumber || contactData.mobilePhoneNumber || '',
+            COMPANY: contactData.CompanyName || contactData.DivisionName || '',
+            ADDRESS1: contactData.AddressLine1 || '',
+            ADDRESS2: contactData.AddressLine2 || '',
+            TOWN: contactData.Town || '',
+            STATE: contactData.County || contactData.State || '',
+            POSTCODE: contactData.Postcode || '',
+            INDUSTRY: contactData.IndustryName || contactData.Industry || '',
+            ACCOUNTMANAGER: contactData.AccountManagerName || contactData.AccountManager || ''
         }
     };
 
     console.log(`Syncing contact ${email} to Dotdigital v3...`);
     
     try {
-        // Try to create first (POST), if contact already exists use PATCH to update
         await client.post(`/contacts/v3`, dotdigitalContact);
         console.log('Contact created successfully in Dotdigital.');
     } catch (err) {
         if (err.response?.data?.errorCode === 'contacts:identifierConflict') {
-            // Contact already exists - update them instead using PATCH by email
             try {
                 console.log(`Contact exists, updating via PATCH...`);
                 await client.patch(`/contacts/v3/email/${encodeURIComponent(email)}`, {
@@ -87,9 +88,46 @@ const syncContactToDotdigital = async (contactData) => {
 };
 
 const syncSaleToDotdigital = async (saleData) => {
-    // Logic for syncing Sales History (Insight Data in Dotdigital)
-    console.log(`Syncing sale record to Dotdigital...`, saleData);
-    // TODO: Map sale to Dotdigital Insight Data 
+    try {
+        const orderId = saleData.SalesOrderHeaderId || saleData.salesOrderHeaderId;
+        const contactId = saleData.ContactId || saleData.contactId;
+
+        if (!orderId || !contactId) {
+            console.log('Missing OrderId or ContactId, skipping sale sync.');
+            return;
+        }
+
+        const contact = await getContact(contactId);
+        const email = contact.Email || contact.email;
+        if (!email) {
+            console.log('No email found for contact, cannot sync sale to Dotdigital.');
+            return;
+        }
+
+        const lines = await getOrderLines(orderId);
+        const skus = lines.map(line => line.ProductCode || line.productCode || 'Unknown').join(', ');
+
+        const insightData = {
+            key: orderId.toString(),
+            json: {
+                orderNumber: saleData.OrderNumber || saleData.orderNumber || orderId.toString(),
+                orderDate: saleData.DateReceived || saleData.dateReceived || new Date().toISOString(),
+                orderValue: saleData.EstimatedTotalAmount || saleData.estimatedTotalAmount || 0,
+                status: saleData.Status || saleData.status || 'Won',
+                skus: skus,
+                productCount: lines.length,
+                closedDate: saleData.DateClosed || saleData.StatusChanged || new Date().toISOString()
+            }
+        };
+
+        const dotdigital = getDotdigitalClient();
+        console.log(`Syncing Sale ${insightData.key} for ${email} to Dotdigital Insight Data (Orders)...`);
+        
+        await dotdigital.post(`/v2/contacts/${encodeURIComponent(email)}/insight/Orders`, insightData);
+        console.log('Sale successfully synced to Dotdigital Insight Data.');
+    } catch (error) {
+        console.error('Failed to sync sale to Dotdigital:', error.response?.data || error.message);
+    }
 };
 
 module.exports = {
