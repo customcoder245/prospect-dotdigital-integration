@@ -11,8 +11,15 @@ const handleBulkSync = async (req, res) => {
         console.log(`Starting Batch Sync: Skip ${skip}, Top ${top}...`);
 
         // 1. Fetch contacts with expanded details in ONE call 
-        const prospectResponse = await prospect.get(`/Contacts?$filter=StatusFlag eq 'A'&$skip=${skip}&$top=${top}&$expand=Division,MainAddress&$orderby=DateOriginallyCreated desc`);
-        const contacts = prospectResponse.data.value || [];
+        // We put $top and $skip at the start to ensure Prospect respects them
+        const prospectUrl = `/Contacts?$top=${top}&$skip=${skip}&$filter=StatusFlag eq 'A'&$expand=Division,MainAddress&$orderby=DateOriginallyCreated desc`;
+        const prospectResponse = await prospect.get(prospectUrl);
+        let contacts = prospectResponse.data.value || [];
+        
+        // Safety: Manual slice to ENSURE we never process more than requested
+        if (contacts.length > top) {
+            contacts = contacts.slice(0, top);
+        }
         
         console.log(`Found ${contacts.length} contacts for this batch. Starting...`);
 
