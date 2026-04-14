@@ -38,8 +38,8 @@ const handleProspectWebhook = async (req, res) => {
 const syncContactToDotdigital = async (contactData) => {
     const client = getDotdigitalClient();
     const email = contactData.Email || contactData.email;
-    if (!email) {
-        console.log('No email found in contact data, skipping Dotdigital sync.');
+    if (!email || !email.includes('@') || !email.includes('.')) {
+        console.log(`Email '${email}' is missing or invalid format. Skipping Dotdigital sync.`);
         return;
     }
 
