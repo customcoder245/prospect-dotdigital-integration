@@ -22,19 +22,12 @@ const { verifyDotdigitalConnection } = require('./services/dotdigital');
 // Endpoint: Test API Connections
 app.get('/test-connections', async (req, res) => {
   try {
-      // Test Dotdigital
       const dotdigitalTest = await verifyDotdigitalConnection();
-      
-      // Test Prospect
       const prospectTest = await verifyProspectConnection();
-
       res.json({
           status: 'success',
           message: 'Successfully connected to both APIs Data Sources',
-          connections: {
-              prospect: 'Connected',
-              dotdigital: 'Connected'
-          }
+          connections: { prospect: 'Connected', dotdigital: 'Connected' }
       });
   } catch (error) {
       res.status(500).json({ status: 'error', message: error.message });
@@ -51,7 +44,7 @@ const { handleSalesWebhook } = require('./handlers/salesSync');
 // Webhook Endpoints
 app.post('/webhook/prospect', handleProspectWebhook);
 app.post('/webhook/dotdigital', handleDotdigitalWebhook);
-app.post('/webhook/sales', handleSalesWebhook); // Sales History (Insight Data)
+app.post('/webhook/sales', handleSalesWebhook);
 
 // Scheduled/Manual Sync Endpoints
 app.get('/sync/suppressed', handleSuppressionSync);
@@ -87,149 +80,41 @@ app.get('/sync/dashboard', (req, res) => {
                 body { font-family: sans-serif; padding: 40px; background: #f4f7f6; }
                 .card { background: white; padding: 30px; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); max-width: 600px; margin: auto; }
                 h1 { color: #333; }
-                .input-group { margin-bottom: 20px; display: flex; align-items: center; gap: 10px; }
                 .progress-bg { background: #eee; border-radius: 10px; height: 25px; margin: 20px 0; overflow: hidden; position: relative; }
                 .progress-bar { background: #4caf50; height: 100%; width: 0%; transition: width 0.3s; }
                 button { background: #2196f3; color: white; border: none; padding: 12px 25px; border-radius: 4px; cursor: pointer; font-size: 16px; font-weight: bold; }
                 button:hover { background: #1976d2; }
-                button:disabled { background: #ccc; cursor: not-allowed; }
-                #log { background: #222; color: #00ff00; padding: 15px; border-radius: 4px; height: 250px; overflow-y: auto; font-family: 'Consolas', monospace; font-size: 13px; margin-top: 20px; border: 1px solid #444; }
-                .status-ready { color: #2196f3; font-weight: bold; }
-                .status-running { color: #f57c00; font-weight: bold; }
-                .status-complete { color: #4caf50; font-weight: bold; }
+                #status { margin-top: 20px; font-weight: bold; color: #555; }
             </style>
         </head>
         <body>
             <div class="card">
-                <h1>Bulk Sync Dashboard</h1>
-                <p>Automate your 30,000 record sync in safe batches to avoid timeouts.</p>
-                
-                <div class="input-group">
-                    <div>
-                        <label>Start from (Skip):</label><br>
-                        <input type="number" id="skip" value="0" style="padding: 8px; width: 100px;">
-                    </div>
-                    <div>
-                        <label>Batch Size (Top):</label><br>
-                        <input type="number" id="top" value="25" style="padding: 8px; width: 80px;">
-                    </div>
-                    <div>
-                        <label>Turbo Mode (Workers):</label><br>
-                        <input type="number" id="concurrency" value="8" style="padding: 8px; width: 60px;">
-                    </div>
-                </div>
-
-                <div class="progress-bg">
-                    <div id="progressBar" class="progress-bar"></div>
-                </div>
-                
-                <button id="startBtn" onclick="startSync()">START TURBO SYNC</button>
-                <button id="stopBtn" onclick="stopSync()" style="background:#f44336; display:none;">PAUSE</button>
-
-                <div id="status" class="status-ready" style="margin-top:20px;">READY</div>
-                <div style="display:flex; gap:20px; font-weight:bold; margin-top:10px;">
-                    <div style="color:#4caf50;">Total Success: <span id="totalSuccess">0</span></div>
-                    <div style="color:#f44336;">Total Failed: <span id="totalFail">0</span></div>
-                </div>
-                <div id="log"></div>
+                <h1>Bulk Sync: Contacts</h1>
+                <p>Sync all validated contacts from Prospect CRM to Dotdigital.</p>
+                <div class="progress-bg"><div id="progress" class="progress-bar"></div></div>
+                <div id="status">Ready to start...</div>
+                <button onclick="startSync()">Start Bulk Sync</button>
             </div>
-
             <script>
-                let isRunning = false;
-                let totalSynced = 0;
-                let totalSuccess = 0;
-                let totalFail = 0;
-                let currentSkip = 0;
-
-                function log(msg, type = '') {
-                    const logEl = document.getElementById('log');
-                    const time = new Date().toLocaleTimeString();
-                    const line = document.createElement('div');
-                    line.innerHTML = \`[\${time}] \${msg}\`;
-                    if (type === 'error') line.style.color = '#ff5252';
-                    if (type === 'success') line.style.color = '#69f0ae';
-                    logEl.appendChild(line);
-                    logEl.scrollTop = logEl.scrollHeight;
-                }
-
-                function stopSync() { 
-                    isRunning = false; 
-                    log('Pausing sync... will stop after current active batches finish.');
-                }
-
-                async function runWorker(top) {
-                    while (isRunning) {
-                        const mySkip = currentSkip;
-                        currentSkip += top;
-                        document.getElementById('skip').value = currentSkip;
-
-                        try {
-                            const url = \`/sync/bulk-prospect?skip=\${mySkip}&top=\${top}\`;
-                            log(\`Worker starting range \${mySkip} to \${mySkip + top}...\`);
-                            
-                            const response = await fetch(url);
-                            const data = await response.json();
-
-                            if (data.status === 'success') {
-                                totalSynced += data.contactsProcessed;
-                                totalSuccess += data.successfullySynced;
-                                totalFail += data.failed;
-                                
-                                document.getElementById('totalSuccess').innerText = totalSuccess;
-                                document.getElementById('totalFail').innerText = totalFail;
-                                
-                                log(\`✅ Finished \${data.batchRange}. Batch: \${data.successfullySynced} ✅ / \${data.failed} ❌. Total: \${totalSynced}\`, 'success');
-                                
-                                if (data.contactsProcessed < top) {
-                                    log('🏆 All records in this range finished.');
-                                    isRunning = false;
-                                    break;
-                                }
-                            } else {
-                                throw new Error(data.message || 'Unknown error');
-                            }
-                        } catch (err) {
-                            log(\`❌ Error at skip \${mySkip}: \${err.message}\`, 'error');
-                            log('Retrying this range in 10 seconds...', 'error');
-                            currentSkip -= top; // Return the range to the pool
-                            await new Promise(r => setTimeout(r, 10000));
-                        }
-                    }
-                }
-
                 async function startSync() {
-                    currentSkip = parseInt(document.getElementById('skip').value);
-                    const top = parseInt(document.getElementById('top').value);
-                    const concurrency = parseInt(document.getElementById('concurrency').value);
-                    
-                    const btn = document.getElementById('startBtn');
-                    const stopBtn = document.getElementById('stopBtn');
-                    const statusEl = document.getElementById('status');
-                    
-                    isRunning = true;
-                    btn.disabled = true;
-                    stopBtn.style.display = 'inline-block';
-                    statusEl.innerText = 'TURBO SYNCING...';
-                    statusEl.className = 'status-running';
-                    log(\`🚀 Turbo sync started with \${concurrency} parallel workers.\`);
-
-                    // Start parallel workers
-                    const workers = [];
-                    for (let i = 0; i < concurrency; i++) {
-                        workers.push(runWorker(top));
-                    }
-
-                    await Promise.all(workers);
-
-                    btn.disabled = false;
-                    stopBtn.style.display = 'none';
-                    if (!isRunning && statusEl.innerText !== 'COMPLETE') {
-                        statusEl.innerText = 'PAUSED';
-                        statusEl.className = 'status-ready';
-                    } else {
-                        statusEl.innerText = 'COMPLETE';
-                        statusEl.className = 'status-complete';
-                    }
+                    const status = document.getElementById('status');
+                    const progress = document.getElementById('progress');
+                    status.innerText = 'Syncing... please wait.';
+                    const eventSource = new EventSource('/sync/bulk-prospect');
+                    eventSource.onmessage = (event) => {
+                        const data = JSON.parse(event.data);
+                        if (data.status === 'processing') {
+                            const percent = Math.round((data.current / data.total) * 100);
+                            progress.style.width = percent + '%';
+                            status.innerText = 'Syncing: ' + data.current + ' / ' + data.total;
+                        } else if (data.status === 'completed') {
+                            status.innerText = '✅ Sync Completed Successfully!';
+                            eventSource.close();
+                        } else if (data.status === 'error') {
+                            status.innerText = '❌ Error: ' + data.message;
+                            eventSource.close();
+                        }
+                    };
                 }
             </script>
         </body>
@@ -237,12 +122,9 @@ app.get('/sync/dashboard', (req, res) => {
     `);
 });
 
-module.exports = app;
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, () => {
+  console.log(\`Server running on port \${PORT}\`);
+});
 
-// Only listen locally if run directly
-if (require.main === module) {
-  const PORT = process.env.PORT || 3000;
-  app.listen(PORT, () => {
-    console.log(`🚀 Server listening on http://localhost:${PORT}`);
-  });
-}
+module.exports = app;
