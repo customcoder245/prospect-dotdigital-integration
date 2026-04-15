@@ -51,10 +51,13 @@ const handleSalesWebhook = async (req, res) => {
         const body = req.body;
         console.log('Sales webhook received:', JSON.stringify(body));
 
-        // Extract the SalesOrderHeader ID from the webhook payload
-        const orderId = body.SalesOrderHeaderId || body.salesOrderHeaderId || body.id;
+        // Extraction Logic: Look inside createdEntity or updatedEntity
+        // In Prospect, 'quoteId' is often the field used for the SalesOrderHeaderId
+        const entity = body.createdEntity || body.updatedEntity || {};
+        const orderId = entity.quoteId || entity.SalesOrderHeaderId || body.SalesOrderHeaderId || body.id;
+
         if (!orderId) {
-            console.log('No SalesOrderHeaderId found in webhook payload. Skipping.');
+            console.log('No SalesOrderHeaderId or quoteId found in webhook payload. Skipping.');
             return;
         }
 
