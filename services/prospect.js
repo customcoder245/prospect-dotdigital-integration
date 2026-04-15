@@ -59,11 +59,19 @@ const getOrderLines = async (quoteId) => {
     return response.data.value || [];
 };
 
+// Function: Get full Sales Order Header details
+const getSalesOrderHeader = async (orderNumber) => {
+    const client = getProspectClient();
+    const response = await client.get(`/SalesOrderHeaders?$filter=OrderNumber eq '${orderNumber}'`);
+    return response.data?.value?.[0] || response.data;
+};
+
 module.exports = {
     getProspectClient,
     verifyProspectConnection,
     getContact,
     getDivision,
     getAddress,
-    getOrderLines
+    getOrderLines,
+    getSalesOrderHeader
 };
