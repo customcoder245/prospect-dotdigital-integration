@@ -4,7 +4,7 @@ const axios = require('axios');
 const getProspectClient = () => {
     return axios.create({
         baseURL: process.env.PROSPECT_BASE_URL || 'https://api.prospectsoft.com/api/v1',
-        timeout: 5000, // 5 second timeout to prevent hanging
+        timeout: 15000, // 15 second timeout to handle slow responses during bulk sync
         headers: {
             'Authorization': `Bearer ${process.env.PROSPECT_API_TOKEN}`,
             'Content-Type': 'application/json',
