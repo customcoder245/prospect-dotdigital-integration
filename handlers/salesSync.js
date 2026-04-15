@@ -62,22 +62,26 @@ const handleSalesWebhook = async (req, res) => {
 
         const prospect = getProspectClient();
 
-        // ── Step 1: Get ContactId from the CRM Quote ───────────────────────────
-        let contactId = null;
+        // ── Step 1: Get ALL possible IDs ──────────────────────────────────────
+        let contactId  = null;
+        let divisionId = entity.divisionId || entity.DivisionId || null;
+        let accountsId = entity.accountsId || entity.AccountsId || null;
 
         if (quoteId) {
             try {
-                console.log(`[Step 1] Fetching Quote(${quoteId}) for ContactId...`);
+                console.log(`[Step 1] Fetching Quote(${quoteId})...`);
                 const quoteRes = await prospect.get(`/Quotes(QuoteId=${quoteId})`);
-                contactId = quoteRes.data?.ContactId || quoteRes.data?.contactId || null;
-                console.log(`[Step 1 OK] ContactId=${contactId}`);
+                const qData = quoteRes.data;
+                contactId  = qData.ContactId  || qData.contactId  || null;
+                divisionId = divisionId || qData.DivisionId || qData.divisionId || null;
+                console.log(`[Step 1 OK] IDs found: ContactId=${contactId}, DivisionId=${divisionId}, AccountsId=${accountsId}`);
+                if (!contactId) console.log(`[Debug] Quote keys: ${Object.keys(qData).join(', ')}`);
             } catch (e) {
                 console.error('[Step 1 Error] Quote lookup failed:', e.message);
             }
         }
 
-        // ── Step 2: Get order data for order info (already retrieved in test) ──
-        // We have all order info from the webhook entity — no extra call needed
+        // ── Step 2: Build Order Info ──────────────────────────────────────────
         const orderInfo = {
             orderNumber: orderNumber,
             orderDate:   entity.orderDate  || entity.OrderDate  || new Date().toISOString(),
@@ -86,17 +90,36 @@ const handleSalesWebhook = async (req, res) => {
             orderStatus: entity.statusflag || entity.StatusFlag || entity.orderStatus || ''
         };
 
-        // ── Step 3: Get contact email ──────────────────────────────────────────
+        // ── Step 3: Get contact email using ANY ID found ──────────────────────
         let contactEmail = null;
+        
+        // Try ContactId
         if (contactId) {
             try {
-                console.log(`[Step 3] Fetching Contact(${contactId})...`);
                 const contact = await getContact(contactId);
-                contactEmail = contact?.Email || contact?.email || null;
-                console.log(`[Step 3 OK] Email=${contactEmail}`);
-            } catch (e) {
-                console.error('[Step 3 Error] Contact lookup failed:', e.message);
-            }
+                contactEmail = contact?.Email || contact?.email;
+                if (contactEmail) console.log(`[Step 3] Found email via ContactId: ${contactEmail}`);
+            } catch (e) {}
+        }
+
+        // Try DivisionId fallback
+        if (!contactEmail && divisionId) {
+            try {
+                const { getDivision } = require('../services/prospect');
+                const div = await getDivision(divisionId);
+                contactEmail = div?.Email || div?.ContactEmail;
+                if (contactEmail) console.log(`[Step 3] Found email via DivisionId: ${contactEmail}`);
+            } catch (e) {}
+        }
+
+        // Try AccountsId fallback (often used for Companies)
+        if (!contactEmail && accountsId) {
+            try {
+                const { getDivision } = require('../services/prospect');
+                const div = await getDivision(accountsId);
+                contactEmail = div?.Email || div?.ContactEmail;
+                if (contactEmail) console.log(`[Step 3] Found email via AccountsId: ${contactEmail}`);
+            } catch (e) {}
         }
 
         if (!contactEmail) {
