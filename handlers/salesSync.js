@@ -7,7 +7,7 @@ const { getDotdigitalClient } = require('../services/dotdigital');
 const pushSaleToInsightData = async (contactEmail, orderInfo, orderLines) => {
     const client = getDotdigitalClient();
 
-    // 1. Ensure the "Orders" collection exists (Matches your account capitalization)
+    // 1. Ensure the "Orders" collection exists
     try {
         await client.post('/insightData/v3/collections/Orders?collectionScope=contact&collectionType=orders');
     } catch (e) {}
@@ -24,7 +24,7 @@ const pushSaleToInsightData = async (contactEmail, orderInfo, orderLines) => {
     const orderRecord = {
         id:            orderInfo.orderNumber,
         order_total:   parseFloat(orderInfo.grossValue) || 0,
-        order_subtotal: parseFloat(orderInfo netValue) || 0,
+        order_subtotal: parseFloat(orderInfo.netValue) || 0,
         currency:      orderInfo.currency || 'AUD',
         purchase_date: orderInfo.orderDate,
         order_status:  orderInfo.orderStatus,
@@ -32,7 +32,7 @@ const pushSaleToInsightData = async (contactEmail, orderInfo, orderLines) => {
     };
 
     try {
-        // Post to /records and specify "Orders" (Capital O)
+        // Post to /records and specify "Orders"
         await client.post(`/insightData/v3/records`, {
             collectionName: 'Orders',
             contactIdentifier: contactEmail,
@@ -41,7 +41,7 @@ const pushSaleToInsightData = async (contactEmail, orderInfo, orderLines) => {
         });
         console.log(`✅ Success: Full Order ${orderInfo.orderNumber} pushed to Dotdigital "Orders" for ${contactEmail}`);
     } catch (e) {
-        console.error(`❌ v3 Order Push failed:`, e.response?.data || e.message);
+        console.error(`❌ v3 Order Push failed for ${orderInfo.orderNumber}:`, e.response?.data || e.message);
     }
 };
 
