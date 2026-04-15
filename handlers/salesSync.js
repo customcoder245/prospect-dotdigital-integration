@@ -71,11 +71,17 @@ const handleSalesWebhook = async (req, res) => {
             try {
                 console.log(`[Step 1] Fetching Quote(${quoteId})...`);
                 const quoteRes = await prospect.get(`/Quotes(QuoteId=${quoteId})`);
-                const qData = quoteRes.data;
-                contactId  = qData.ContactId  || qData.contactId  || null;
-                divisionId = divisionId || qData.DivisionId || qData.divisionId || null;
-                console.log(`[Step 1 OK] IDs found: ContactId=${contactId}, DivisionId=${divisionId}, AccountsId=${accountsId}`);
-                if (!contactId) console.log(`[Debug] Quote keys: ${Object.keys(qData).join(', ')}`);
+                const qResp = quoteRes.data;
+                const qData = qResp.value ? qResp.value[0] : qResp;
+                
+                if (qData) {
+                    contactId  = qData.ContactId  || qData.contactId  || null;
+                    divisionId = divisionId || qData.DivisionId || qData.divisionId || null;
+                    accountsId = accountsId || qData.AccountsId || qData.accountsId || null;
+                    console.log(`[Step 1 OK] IDs found: ContactId=${contactId}, DivisionId=${divisionId}, AccountsId=${accountsId}`);
+                } else {
+                    console.log(`[Step 1 OK] No data found in Quote response.`);
+                }
             } catch (e) {
                 console.error('[Step 1 Error] Quote lookup failed:', e.message);
             }
