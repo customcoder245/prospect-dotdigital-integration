@@ -2,44 +2,47 @@ const { getProspectClient, getOrderLines, getContact } = require('../services/pr
 const { getDotdigitalClient } = require('../services/dotdigital');
 
 // ─────────────────────────────────────────────
-// Push Insight Data to Dotdigital (v3 - R3 Region)
+// Push Insight Data to Dotdigital (Standard "orders" Schema)
 // ─────────────────────────────────────────────
 const pushSaleToInsightData = async (contactEmail, orderInfo, orderLines) => {
     const client = getDotdigitalClient();
 
-    // 1. Ensure "Orders" collection exists (v3)
+    // 1. Ensure the "orders" collection exists with type "orders"
+    // Using lowercase "orders" as required by Dotdigital Standard Schema
     try {
-        await client.post('/insightData/v3/collections/Orders?collectionScope=contact&collectionType=orders');
+        await client.post('/insightData/v3/collections/orders?collectionScope=contact&collectionType=orders');
     } catch (e) {}
 
-    // 2. Push Line Items
-    for (const line of orderLines) {
-        const sku    = line.ProductCode || line.StockCode || 'N/A';
-        const lineId = line.OrderLineId || Math.random().toString(36);
-        const key    = `${orderInfo.orderNumber}-${lineId}`;
-        
-        const record = {
-            orderNumber: orderInfo.orderNumber,
-            orderDate:   orderInfo.orderDate,
-            sku:         sku,
-            quantity:    parseInt(line.Quantity) || 1,
-            unitPrice:   parseFloat(line.UnitPrice) || 0,
-            orderStatus: orderInfo.orderStatus,
-            totalOrderValue: parseFloat(orderInfo.grossValue) || 0
-        };
+    // 2. Prepare the products array
+    const productsArray = orderLines.map(line => ({
+        sku:   line.ProductCode || line.StockCode || 'N/A',
+        name:  line.Description || line.ProductCode || 'Product',
+        price: parseFloat(line.UnitPrice) || 0,
+        qty:   parseInt(line.Quantity) || 1
+    }));
 
-        try {
-            // FIXED v3 FORMAT: Post to /records and specify collection in JSON
-            await client.post(`/insightData/v3/records`, {
-                collectionName: 'Orders',
-                contactIdentifier: contactEmail,
-                key: key,
-                json: JSON.stringify(record)
-            });
-            console.log(`✅ Success: SKU ${sku} pushed to Orders for ${contactEmail}`);
-        } catch (e) {
-            console.error(`❌ v3 Push failed for SKU ${sku}:`, e.response?.data || e.message);
-        }
+    // 3. Prepare the Top-Level Order Record (matches Dotdigital Schema)
+    const orderRecord = {
+        id:            orderInfo.orderNumber, // Order ID as the key
+        order_total:   parseFloat(orderInfo.grossValue) || 0,
+        order_subtotal: parseFloat(orderInfo.netValue) || 0,
+        currency:      orderInfo.currency || 'AUD',
+        purchase_date: orderInfo.orderDate,
+        order_status:  orderInfo.orderStatus,
+        products:      productsArray
+    };
+
+    try {
+        // FIXED v3 FORMAT: Post to /records and specify collection in JSON
+        await client.post(`/insightData/v3/records`, {
+            collectionName: 'orders',
+            contactIdentifier: contactEmail,
+            key: orderInfo.orderNumber, // The order number is the unique key
+            json: JSON.stringify(orderRecord)
+        });
+        console.log(`✅ Success: Full Order ${orderInfo.orderNumber} pushed to Dotdigital orders for ${contactEmail}`);
+    } catch (e) {
+        console.error(`❌ v3 Order Push failed:`, e.response?.data || e.message);
     }
 };
 
@@ -80,9 +83,11 @@ const handleSalesWebhook = async (req, res) => {
         
         const orderInfo = {
             orderNumber,
-            orderDate:   entity.orderDate || new Date().toISOString(),
-            grossValue:  entity.grossValue || 0,
-            orderStatus: entity.orderStatus || 'Placed'
+            orderDate:   entity.orderDate || entity.OrderDate || new Date().toISOString(),
+            grossValue:  entity.grossValue || entity.GrossValue || 0,
+            netValue:    entity.netValue || entity.Value || 0,
+            currency:    entity.currencyCode || entity.CurrencyCode || 'AUD',
+            orderStatus: entity.orderStatus || entity.OrderStatus || 'Placed'
         };
 
         await pushSaleToInsightData(contactEmail, orderInfo, lines);
