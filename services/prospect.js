@@ -28,18 +28,19 @@ const verifyProspectConnection = async () => {
     }
 };
 
-// Function: Get a single contact by ID
+// Function: Get a single contact details (using filter for stability)
 const getContact = async (id) => {
     const client = getProspectClient();
-    const response = await client.get(`/Contacts(ContactId=${id})`);
-    return response.data;
+    const response = await client.get(`/Contacts?$filter=ContactId eq ${id}`);
+    return response.data?.value?.[0] || response.data;
 };
 
-// Function: Get division (Company) details
+// Function: Get division/company details (using filter for stability)
 const getDivision = async (id) => {
     const client = getProspectClient();
-    const response = await client.get(`/Divisions(DivisionId=${id})`);
-    return response.data;
+    const filter = (typeof id === 'string' && id.includes('-')) ? `DivisionId eq '${id}'` : `DivisionId eq ${id}`;
+    const response = await client.get(`/Divisions?$filter=${filter}`);
+    return response.data?.value?.[0] || response.data;
 };
 
 // Function: Get address details
