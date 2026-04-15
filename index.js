@@ -57,6 +57,35 @@ app.post('/webhook/sales', handleSalesWebhook); // Sales History (Insight Data)
 app.get('/sync/suppressed', handleSuppressionSync);
 app.get('/sync/bulk-prospect', handleBulkSync);
 
+// ── DEBUG: Test SalesOrderHeaders API connectivity ──────────────────────────
+app.get('/test/sales-api', async (req, res) => {
+    const { getProspectClient } = require('./services/prospect');
+    const orderNumber = req.query.order || 'SO-00085215';
+    const opco = req.query.opco || 'A';
+    const client = getProspectClient();
+    const results = {};
+
+    // Test 1: Can we reach SalesOrderHeaders at all?
+    try {
+        const r1 = await client.get('/SalesOrderHeaders?$top=1');
+        results.test1_top1 = { status: r1.status, count: r1.data?.value?.length, firstKey: r1.data?.value?.[0] ? Object.keys(r1.data.value[0]).join(', ') : 'no rows' };
+    } catch (e) { results.test1_top1 = { error: e.message }; }
+
+    // Test 2: Filter by OrderNumber
+    try {
+        const r2 = await client.get(`/SalesOrderHeaders?$filter=OrderNumber eq '${orderNumber}'`);
+        results.test2_filter_ordernum = { status: r2.status, count: r2.data?.value?.length, row0: r2.data?.value?.[0] };
+    } catch (e) { results.test2_filter_ordernum = { error: e.message }; }
+
+    // Test 3: Filter by both fields
+    try {
+        const r3 = await client.get(`/SalesOrderHeaders?$filter=OperatingCompanyCode eq '${opco}' and OrderNumber eq '${orderNumber}'`);
+        results.test3_filter_both = { status: r3.status, count: r3.data?.value?.length, row0: r3.data?.value?.[0] };
+    } catch (e) { results.test3_filter_both = { error: e.message }; }
+
+    res.json({ baseURL: process.env.PROSPECT_BASE_URL, orderNumber, results });
+});
+
 // Automated Sync Dashboard
 app.get('/sync/dashboard', (req, res) => {
     res.send(`
