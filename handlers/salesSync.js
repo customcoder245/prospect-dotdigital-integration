@@ -2,15 +2,14 @@ const { getProspectClient, getOrderLines, getContact } = require('../services/pr
 const { getDotdigitalClient } = require('../services/dotdigital');
 
 // ─────────────────────────────────────────────
-// Push Insight Data to Dotdigital (Standard "orders" Schema)
+// Push Insight Data to Dotdigital (Standard "Orders" Schema)
 // ─────────────────────────────────────────────
 const pushSaleToInsightData = async (contactEmail, orderInfo, orderLines) => {
     const client = getDotdigitalClient();
 
-    // 1. Ensure the "orders" collection exists with type "orders"
-    // Using lowercase "orders" as required by Dotdigital Standard Schema
+    // 1. Ensure the "Orders" collection exists (Matches your account capitalization)
     try {
-        await client.post('/insightData/v3/collections/orders?collectionScope=contact&collectionType=orders');
+        await client.post('/insightData/v3/collections/Orders?collectionScope=contact&collectionType=orders');
     } catch (e) {}
 
     // 2. Prepare the products array
@@ -21,11 +20,11 @@ const pushSaleToInsightData = async (contactEmail, orderInfo, orderLines) => {
         qty:   parseInt(line.Quantity) || 1
     }));
 
-    // 3. Prepare the Top-Level Order Record (matches Dotdigital Schema)
+    // 3. Prepare the Top-Level Order Record
     const orderRecord = {
-        id:            orderInfo.orderNumber, // Order ID as the key
+        id:            orderInfo.orderNumber,
         order_total:   parseFloat(orderInfo.grossValue) || 0,
-        order_subtotal: parseFloat(orderInfo.netValue) || 0,
+        order_subtotal: parseFloat(orderInfo netValue) || 0,
         currency:      orderInfo.currency || 'AUD',
         purchase_date: orderInfo.orderDate,
         order_status:  orderInfo.orderStatus,
@@ -33,14 +32,14 @@ const pushSaleToInsightData = async (contactEmail, orderInfo, orderLines) => {
     };
 
     try {
-        // FIXED v3 FORMAT: Post to /records and specify collection in JSON
+        // Post to /records and specify "Orders" (Capital O)
         await client.post(`/insightData/v3/records`, {
-            collectionName: 'orders',
+            collectionName: 'Orders',
             contactIdentifier: contactEmail,
-            key: orderInfo.orderNumber, // The order number is the unique key
+            key: orderInfo.orderNumber,
             json: JSON.stringify(orderRecord)
         });
-        console.log(`✅ Success: Full Order ${orderInfo.orderNumber} pushed to Dotdigital orders for ${contactEmail}`);
+        console.log(`✅ Success: Full Order ${orderInfo.orderNumber} pushed to Dotdigital "Orders" for ${contactEmail}`);
     } catch (e) {
         console.error(`❌ v3 Order Push failed:`, e.response?.data || e.message);
     }
@@ -85,7 +84,7 @@ const handleSalesWebhook = async (req, res) => {
             orderNumber,
             orderDate:   entity.orderDate || entity.OrderDate || new Date().toISOString(),
             grossValue:  entity.grossValue || entity.GrossValue || 0,
-            netValue:    entity.netValue || entity.Value || 0,
+            netValue:    entity.Value || entity.netValue || 0,
             currency:    entity.currencyCode || entity.CurrencyCode || 'AUD',
             orderStatus: entity.orderStatus || entity.OrderStatus || 'Placed'
         };
