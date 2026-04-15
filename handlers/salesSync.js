@@ -113,23 +113,33 @@ const handleSalesWebhook = async (req, res) => {
 
         if (!contactId && !divisionId) {
             try {
-                const fetchUrl = `/SalesOrderHeaders?$filter=OperatingCompanyCode eq '${opco}' and OrderNumber eq '${orderNumber}'`;
-                console.log(`[Step 1] Fetching full order details from: ${fetchUrl}`);
+                const orderNum = entity.orderNumber || entity.OrderNumber;
+                const opco = entity.operatingCompanyCode || entity.OperatingCompanyCode || 'A';
+                const fetchUrl = `/SalesOrderHeaders?$filter=OperatingCompanyCode eq '${opco}' and OrderNumber eq '${orderNum}'`;
                 
-                const orderRes = await prospect.get(fetchUrl);
+                console.log(`[Step 1] Attempting fetch: ${fetchUrl}`);
+                let orderRes;
                 
-                console.log(`[Step 2] Order API responded with status: ${orderRes.status}`);
-                const orderRows = orderRes.data?.value || [];
+                try {
+                    orderRes = await prospect.get(fetchUrl);
+                } catch (e) {
+                    if (body.entityODataLink) {
+                        console.log(`[Step 1 Fallback] Trying direct link: ${body.entityODataLink}`);
+                        orderRes = await prospect.get(body.entityODataLink);
+                    } else { throw e; }
+                }
+
+                const orderRows = orderRes.data?.value ? orderRes.data.value : [orderRes.data];
                 
-                if (orderRows.length > 0) {
+                if (orderRows.length > 0 && orderRows[0]) {
                     contactId  = orderRows[0].ContactId  || orderRows[0].contactId  || null;
                     divisionId = orderRows[0].DivisionId || orderRows[0].divisionId || null;
                     console.log(`[Step 3] Order IDs found: ContactId=${contactId}, DivisionId=${divisionId}`);
                 } else {
-                    console.log(`[Step 3] Order ${orderNumber} returned 0 rows.`);
+                    console.log(`[Step 3] No order rows found.`);
                 }
             } catch (fetchErr) {
-                console.error('[Step 2 Error] Failed to fetch full order details:', fetchErr.response?.data || fetchErr.message);
+                console.error('[Step 2 Error] Could not fetch order through any method:', fetchErr.message);
                 return;
             }
         }
