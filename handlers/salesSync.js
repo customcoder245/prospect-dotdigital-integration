@@ -7,6 +7,7 @@ const { getDotdigitalClient } = require('../services/dotdigital');
 const pushSaleToInsightData = async (contactEmail, orderInfo, orderLines) => {
     const client = getDotdigitalClient();
 
+    // 1. Prepare products array with correct Prospect field names
     const productsArray = orderLines.map(line => ({
         sku:   line.StockCode || line.ProductCode || 'N/A',
         name:  line.Description || line.ProductCode || 'Product',
@@ -14,6 +15,7 @@ const pushSaleToInsightData = async (contactEmail, orderInfo, orderLines) => {
         qty:   parseFloat(line.Quantity) || 1
     }));
 
+    // 2. Prepare Order Record with verified Prospect fields
     const orderRecord = {
         id:            orderInfo.orderNumber,
         order_total:   parseFloat(orderInfo.grossValue) || 0,
@@ -25,8 +27,10 @@ const pushSaleToInsightData = async (contactEmail, orderInfo, orderLines) => {
     };
 
     try {
+        // v3 PUT endpoint /insightData/v3/contacts/email/{email}/{collection}/{id}
+        // Collection "Orders" is already created, skipping creation check to avoid 429s
         await client.put(`/insightData/v3/contacts/email/${contactEmail}/Orders/${orderInfo.orderNumber}`, orderRecord);
-        console.log(`✅ Success: Sent Order ${orderInfo.orderNumber} to ${contactEmail}`);
+        console.log(`✅ Success: Sync complete for ${orderInfo.orderNumber}`);
         return { success: true };
     } catch (e) {
         const errorMsg = e.response?.data?.message || e.response?.data || e.message;
@@ -50,17 +54,16 @@ const handleSalesWebhook = async (req, res) => {
         const liveOrder = await getSalesOrderHeader(orderNumber);
         if (!liveOrder) return res.json({ status: 'order_not_found', orderNumber });
 
-        // 2. Aggressive Email Resolution
+        // 2. Resolve Email
         let contactEmail = null;
+        let contactId = liveOrder.ContactId || liveOrder.CreatedContact;
         
-        // Try ContactId from Live Order
-        const contactId = liveOrder.ContactId || liveOrder.CreatedContact;
         if (contactId) {
             const con = await getContact(contactId);
             contactEmail = con?.Email || con?.email || null;
         }
 
-        // Try QuoteId fallback if email still missing
+        // Fallback to Quote if needed
         if (!contactEmail && (liveOrder.QuoteId || quoteIdInput)) {
             const qId = liveOrder.QuoteId || quoteIdInput;
             const prospect = getProspectClient();
@@ -75,30 +78,20 @@ const handleSalesWebhook = async (req, res) => {
             } catch (e) {}
         }
 
-        // Final verification
-        if (!contactEmail) {
-            return res.json({ 
-                status: 'no_email_found', 
-                orderNumber, 
-                diagnostics: {
-                    orderContactId: contactId,
-                    orderQuoteId: liveOrder.QuoteId
-                }
-            });
-        }
+        if (!contactEmail) return res.json({ status: 'no_email_found', orderNumber });
 
-        // 3. Fetch Order Lines
+        // 3. Fetch Lines
         const actualQuoteId = liveOrder.QuoteId || quoteIdInput;
         const lines = await getOrderLines(actualQuoteId);
         
-        // 4. Transform for Dotdigital
+        // 4. Map verified Prospect fields (GrossValue, NetValue)
         const orderInfo = {
             orderNumber: orderNumber,
             orderDate:   liveOrder.OrderDate || new Date().toISOString(),
-            grossValue:  liveOrder.GrossTotal || 0,
-            netValue:    liveOrder.NetTotal || 0,
+            grossValue:  liveOrder.GrossValue || 0,
+            netValue:    liveOrder.NetValue || 0,
             currency:    liveOrder.CurrencyCode || 'AUD',
-            orderStatus: liveOrder.OrderStatusDescription || 'Processed'
+            orderStatus: liveOrder.OrderStatus || 'Placed'
         };
 
         const result = await pushSaleToInsightData(contactEmail, orderInfo, lines);
@@ -110,7 +103,6 @@ const handleSalesWebhook = async (req, res) => {
         });
 
     } catch (err) {
-        console.error('Sales Sync Exception:', err.message);
         return res.json({ status: 'exception', error: err.message });
     }
 };
