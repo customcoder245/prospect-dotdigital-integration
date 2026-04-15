@@ -113,50 +113,48 @@ const handleSalesWebhook = async (req, res) => {
 
         if (!contactId && !divisionId) {
             try {
-                console.log(`Fetching full order details for ${orderNumber}...`);
-                const orderRes = await prospect.get(
-                    `/SalesOrderHeaders?$filter=OperatingCompanyCode eq '${opco}' and OrderNumber eq '${orderNumber}'`
-                );
+                const fetchUrl = `/SalesOrderHeaders?$filter=OperatingCompanyCode eq '${opco}' and OrderNumber eq '${orderNumber}'`;
+                console.log(`[Step 1] Fetching full order details from: ${fetchUrl}`);
+                
+                const orderRes = await prospect.get(fetchUrl);
+                
+                console.log(`[Step 2] Order API responded with status: ${orderRes.status}`);
                 const orderRows = orderRes.data?.value || [];
+                
                 if (orderRows.length > 0) {
                     contactId  = orderRows[0].ContactId  || orderRows[0].contactId  || null;
                     divisionId = orderRows[0].DivisionId || orderRows[0].divisionId || null;
-                    console.log(`Order fetched. ContactId=${contactId}, DivisionId=${divisionId}`);
+                    console.log(`[Step 3] Order IDs found: ContactId=${contactId}, DivisionId=${divisionId}`);
                 } else {
-                    console.log(`Order ${orderNumber} returned no rows from Prospect API.`);
+                    console.log(`[Step 3] Order ${orderNumber} returned 0 rows.`);
                 }
             } catch (fetchErr) {
-                console.error('Failed to fetch full order details:', fetchErr.response?.data || fetchErr.message);
+                console.error('[Step 2 Error] Failed to fetch full order details:', fetchErr.response?.data || fetchErr.message);
+                return;
             }
         }
 
-        // Resolve contact email from ContactId or DivisionId
+        console.log('[Step 4] Starting email resolution...');
         const contactEmail = await resolveContactEmail(contactId, divisionId);
 
         if (!contactEmail) {
-            console.log(`⚠️ No contact email found for order ${orderNumber} (ContactId=${contactId}, DivisionId=${divisionId}). Skipping.`);
+            console.log(`[Step 5 Fallback] No contact email found for Order ${orderNumber}.`);
             return;
         }
 
-        // Validate email
-        if (!contactEmail.includes('@') || !contactEmail.includes('.')) {
-            console.log(`⚠️ Invalid email '${contactEmail}' for order ${orderNumber}. Skipping.`);
-            return;
+        console.log(`[Step 6] Email resolved: ${contactEmail}. Fetching Order Lines...`);
+        
+        try {
+            const orderLines = await getOrderLines(orderNumber, opco);
+            console.log(`[Step 7] Found ${orderLines.length} line item(s). Pushing to Dotdigital...`);
+            
+            if (orderLines.length > 0) {
+                await pushSaleToInsightData(contactEmail, orderInfo, orderLines);
+                console.log(`✅ [Step 8] Sales sync complete for order ${orderNumber}.`);
+            }
+        } catch (lineErr) {
+            console.error('[Step 7 Error] Failed to fetch order lines:', lineErr.message);
         }
-
-        // Fetch order lines (SKUs) — filtered by OrderNumber + OperatingCompanyCode
-        const orderLines = await getOrderLines(orderNumber, opco);
-        if (!orderLines || orderLines.length === 0) {
-            console.log(`⚠️ No order lines found for order ${orderNumber}. Skipping.`);
-            return;
-        }
-
-        console.log(`Found ${orderLines.length} line item(s) for order ${orderNumber}. Pushing to Dotdigital...`);
-
-        // Push each line as Insight Data
-        await pushSaleToInsightData(contactEmail, orderInfo, orderLines);
-
-        console.log(`✅ Sales sync complete for order ${orderNumber}.`);
 
     } catch (err) {
         console.error('Sales Webhook Error:', err.response?.data || err.message);
