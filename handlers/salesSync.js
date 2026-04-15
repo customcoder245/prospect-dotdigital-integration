@@ -80,8 +80,8 @@ const handleSalesWebhook = async (req, res) => {
         // 3. Get Lines
         let orderLines = [];
         try {
-            console.log(`[Trace] Fetching Lines: /SalesOrderLines?$filter=OrderNumber eq '${orderNumber}'...`);
-            orderLines = await getOrderLines(orderNumber, opco);
+            console.log(`[Trace] Fetching Lines from QuoteLines (QuoteId=${quoteId})...`);
+            orderLines = await getOrderLines(quoteId);
             console.log(`[Trace] Lines found: ${orderLines.length}`);
         } catch (e) {
             console.error(`[Trace ERROR] Lines fetch failed: ${e.message}`);

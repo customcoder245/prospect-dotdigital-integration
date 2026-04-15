@@ -50,11 +50,11 @@ const getAddress = async (id) => {
     return response.data;
 };
 
-// Function: Get order lines for a sales order (using composite key)
-const getOrderLines = async (orderNumber, opco = 'A') => {
+// Function: Get order lines for a sales order (using QuoteLines table)
+const getOrderLines = async (quoteId) => {
     const client = getProspectClient();
     const response = await client.get(
-        `/SalesOrderLines?$filter=OrderNumber eq '${orderNumber}' and OperatingCompanyCode eq '${opco}'`
+        `/QuoteLines?$filter=QuoteId eq ${quoteId}`
     );
     return response.data.value || [];
 };
