@@ -7,15 +7,15 @@ const { getDotdigitalClient } = require('../services/dotdigital');
 const pushSaleToInsightData = async (contactEmail, orderInfo, orderLines) => {
     const client = getDotdigitalClient();
 
-    // 1. Prepare products array with correct Prospect field names
+    // 1. Prepare products array with VERIFIED Prospect fields
     const productsArray = orderLines.map(line => ({
-        sku:   line.StockCode || line.ProductCode || 'N/A',
-        name:  line.Description || line.ProductCode || 'Product',
-        price: parseFloat(line.UnitPrice) || 0,
-        qty:   parseFloat(line.Quantity) || 1
+        sku:   line.ProductItemId || line.StockCode || 'N/A',
+        name:  line.Description || line.ProductItemId || 'Product',
+        price: parseFloat(line.DecimalPrice) || parseFloat(line.Price) || 0,
+        qty:   parseFloat(line.DecimalQuantity) || parseFloat(line.Quantity) || 1
     }));
 
-    // 2. Prepare Order Record with verified Prospect fields
+    // 2. Prepare Order Record
     const orderRecord = {
         id:            orderInfo.orderNumber,
         order_total:   parseFloat(orderInfo.grossValue) || 0,
@@ -27,8 +27,7 @@ const pushSaleToInsightData = async (contactEmail, orderInfo, orderLines) => {
     };
 
     try {
-        // v3 PUT endpoint /insightData/v3/contacts/email/{email}/{collection}/{id}
-        // Collection "Orders" is already created, skipping creation check to avoid 429s
+        // v3 PUT endpoint - /insightData/v3/contacts/email/{email}/Orders/{recordId}
         await client.put(`/insightData/v3/contacts/email/${contactEmail}/Orders/${orderInfo.orderNumber}`, orderRecord);
         console.log(`✅ Success: Sync complete for ${orderInfo.orderNumber}`);
         return { success: true };
@@ -63,7 +62,6 @@ const handleSalesWebhook = async (req, res) => {
             contactEmail = con?.Email || con?.email || null;
         }
 
-        // Fallback to Quote if needed
         if (!contactEmail && (liveOrder.QuoteId || quoteIdInput)) {
             const qId = liveOrder.QuoteId || quoteIdInput;
             const prospect = getProspectClient();
@@ -84,7 +82,7 @@ const handleSalesWebhook = async (req, res) => {
         const actualQuoteId = liveOrder.QuoteId || quoteIdInput;
         const lines = await getOrderLines(actualQuoteId);
         
-        // 4. Map verified Prospect fields (GrossValue, NetValue)
+        // 4. Map verified Prospect fields
         const orderInfo = {
             orderNumber: orderNumber,
             orderDate:   liveOrder.OrderDate || new Date().toISOString(),
