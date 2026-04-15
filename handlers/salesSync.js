@@ -39,68 +39,47 @@ const handleSalesWebhook = async (req, res) => {
         const entity = req.body.createdEntity || req.body.updatedEntity || {};
         const orderNumber = entity.orderNumber || entity.OrderNumber;
         const opco = entity.operatingCompanyCode || entity.OperatingCompanyCode || 'A';
+        const quoteId = entity.quoteId || entity.QuoteId;
 
         if (!orderNumber) return res.json({ status: 'no_order' });
 
         const prospect = getProspectClient();
-        console.log(`Processing Order: ${orderNumber}`);
+        console.log(`Processing Order: ${orderNumber} (QuoteId=${quoteId})`);
 
-        // 1. Fetch the full order to get the correct IDs
-        const orderRes = await prospect.get(`/SalesOrderHeaders?$filter=OrderNumber eq '${orderNumber}' and OperatingCompanyCode eq '${opco}'`);
-        const orderData = orderRes.data?.value?.[0];
-
-        if (!orderData) {
-            console.log(`Order ${orderNumber} not found.`);
-            return res.json({ status: 'not_found' });
+        // 1. Get the Contact ID from the Quote (This is the most accurate place)
+        let contactId = null;
+        if (quoteId) {
+            try {
+                const qRes = await prospect.get(`/Quotes(QuoteId=${quoteId})`);
+                const qData = qRes.data.value ? qRes.data.value[0] : qRes.data;
+                contactId = qData.ContactId || qData.CreatedContact || null;
+                console.log(`Contact ID found in Quote: ${contactId}`);
+            } catch (e) { console.log(`Quote fetch error: ${e.message}`); }
         }
 
-        // 2. Find the email using any ID available
-        const contactId = orderData.ContactId || orderData.contactId || null;
-        const targetId  = orderData.AccountsId || orderData.DivisionId || contactId;
-        
-        console.log(`Looking for email. ContactId: ${contactId}, TargetId (Account/Div): ${targetId}`);
-
+        // 2. Resolve Email
         let contactEmail = null;
-        
-        // 1. Try ContactId first
         if (contactId) {
             try {
+                // In OData, integer IDs like 61744 don't need quotes
                 const con = await getContact(contactId);
                 contactEmail = con?.Email || con?.email;
-            } catch (e) {}
-        }
-
-        // 2. Try searching Contacts by AccountsId (very reliable)
-        if (!contactEmail && targetId) {
-            try {
-                console.log(`[Step 3] Searching Contacts for AccountsId: ${targetId}`);
-                const searchRes = await prospect.get(`/Contacts?$filter=AccountsId eq '${targetId}'`);
-                const matched = searchRes.data?.value?.[0];
-                contactEmail = matched?.Email || matched?.email;
-                if (contactEmail) console.log(`[Step 3 OK] Found email via Contact Search: ${contactEmail}`);
-            } catch (e) { console.log(`Search error: ${e.message}`); }
-        }
-
-        // 3. Try DivisionId fallback
-        if (!contactEmail && targetId) {
-            try {
-                const div = await getDivision(targetId);
-                contactEmail = div?.Email || div?.ContactEmail;
-            } catch (e) {}
+                if (contactEmail) console.log(`Found email via ContactId ${contactId}: ${contactEmail}`);
+            } catch (e) { console.log(`Contact ID lookup failed: ${e.message}`); }
         }
 
         if (!contactEmail) {
-            console.log(`Could not find email for ID ${targetId}`);
-            return res.json({ status: 'no_email' });
+            console.log(`Final check: No email found for Order ${orderNumber}`);
+            return res.json({ status: 'no_email', contactId });
         }
 
         // 3. Get Lines and Push
         const orderLines = await getOrderLines(orderNumber, opco);
         const orderInfo  = {
             orderNumber,
-            orderDate:   orderData.OrderDate || new Date().toISOString(),
-            grossValue:  orderData.GrossValue || 0,
-            orderStatus: orderData.OrderStatus || 'Placed'
+            orderDate:   entity.orderDate || new Date().toISOString(),
+            grossValue:  entity.grossValue || 0,
+            orderStatus: entity.orderStatus || 'Placed'
         };
 
         await pushSaleToInsightData(contactEmail, orderInfo, orderLines);
