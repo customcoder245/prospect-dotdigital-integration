@@ -34,14 +34,12 @@ const pushSaleToInsightData = async (contactEmail, orderInfo, orderLines) => {
         };
 
         try {
-            // Dotdigital v3 Record Import Endpoint
-            await client.post(`/insightData/v3/collections/Orders/records`, {
-                contactIdentifier: contactEmail,
-                key: key,
-                json: JSON.stringify(record)
-            });
+            // Use the stable v2 endpoint for pushing the actual record
+            await client.post(`/v2/contacts/${contactEmail}/insight-data/Orders/${key}`, record);
             console.log(`✅ Success: SKU ${sku} pushed for ${contactEmail}`);
         } catch (e) {
+            console.error(`❌ Push failed for SKU ${sku}:`, e.response?.data || e.message);
+        }
             console.error(`❌ Push failed for SKU ${sku}:`, e.response?.data || e.message);
         }
     }
