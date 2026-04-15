@@ -31,7 +31,13 @@ app.get('/health', async (req, res) => {
     }; 
   }
 
-  // 3. If order is provided, run the sync!
+  // 3. Diagnostics: Get "Orders" Schema
+  try {
+    const schemaRes = await ddClient.get('/insightData/v3/collections/Orders/schema');
+    diagnostics.orders_schema = schemaRes.data;
+  } catch (e) { diagnostics.orders_schema = { error: e.message }; }
+
+  // 4. If order is provided, run the sync!
   if (req.query.order) {
     const { handleSalesWebhook } = require('./handlers/salesSync');
     const mockReq = { body: { createdEntity: { orderNumber: req.query.order, quoteId: req.query.quoteId } } };
