@@ -1,44 +1,75 @@
-const { getProspectClient, getOrderLines } = require('../services/prospect');
+const { getProspectClient, getOrderLines, getContact, getDivision } = require('../services/prospect');
 const { getDotdigitalClient } = require('../services/dotdigital');
 
 // ─────────────────────────────────────────────
 // Push Insight Data (Order + Lines) to Dotdigital
 // ─────────────────────────────────────────────
-const pushSaleToInsightData = async (contactEmail, orderData, orderLines) => {
+const pushSaleToInsightData = async (contactEmail, orderInfo, orderLines) => {
     const client = getDotdigitalClient();
 
-    // Build one record per SKU (line item) as Dotdigital expects
-    // Using orderNumber as part of the key since Prospect uses composite keys
     for (const line of orderLines) {
-        const orderNum = orderData.OrderNumber || orderData.orderNumber || orderData.SalesOrderHeaderId || 'unknown';
-        const lineId = line.OrderLineId || line.SalesOrderLineId || line.lineId || Math.random();
-        const uniqueKey = `${orderNum}-${lineId}`;
+        const sku = line.ProductCode || line.StockCode || line.productCode || '';
+        const lineRef = line.OrderLineId || line.SalesOrderLineId || line.lineId || sku || Math.random().toString(36);
+        const uniqueKey = `${orderInfo.orderNumber}-${lineRef}`;
 
         const insightJson = {
-            orderNumber: orderNum,
-            orderDate: orderData.OrderDate || orderData.orderDate || orderData.DateCreated || new Date().toISOString(),
-            sku: line.ProductCode || line.StockCode || line.productCode || '',
+            orderNumber:       orderInfo.orderNumber,
+            orderDate:         orderInfo.orderDate,
+            sku:               sku,
             productDescription: line.ProductDescription || line.description || '',
-            quantity: line.Quantity || line.quantity || 1,
-            unitPrice: line.UnitPrice || line.unitPrice || 0,
-            lineTotal: line.LineTotal || line.lineTotal || (line.Quantity * line.UnitPrice) || 0,
-            orderStatus: orderData.OrderStatus || orderData.statusflag || orderData.Status || '',
-            totalOrderValue: orderData.GrossValue || orderData.grossValue || orderData.TotalValue || 0
+            quantity:          line.Quantity || line.quantity || 1,
+            unitPrice:         line.UnitPrice || line.unitPrice || 0,
+            lineTotal:         line.LineTotal || line.lineTotal || 0,
+            orderStatus:       orderInfo.orderStatus,
+            totalOrderValue:   orderInfo.grossValue
         };
 
         try {
-            // POST to Dotdigital Insight Data — collection name: "Orders"
             await client.post('/v3/insight-data/records', {
                 collectionName: 'Orders',
                 contactIdentifier: contactEmail,
                 key: uniqueKey,
                 json: JSON.stringify(insightJson)
             });
-            console.log(`Insight Data pushed for SKU: ${insightJson.sku} | Order: ${orderNum}`);
+            console.log(`✅ Insight Data pushed: SKU=${sku} | Order=${orderInfo.orderNumber} | Contact=${contactEmail}`);
         } catch (err) {
-            console.error(`Failed to push Insight Data for line ${uniqueKey}:`, err.response?.data || err.message);
+            console.error(`❌ Failed to push Insight Data [${uniqueKey}]:`, err.response?.data || err.message);
         }
     }
+};
+
+// ─────────────────────────────────────────────
+// Resolve contact email from ContactId or DivisionId
+// ─────────────────────────────────────────────
+const resolveContactEmail = async (contactId, divisionId) => {
+    // Try ContactId first
+    if (contactId) {
+        try {
+            const contact = await getContact(contactId);
+            if (contact?.Email) {
+                console.log(`Found email via ContactId ${contactId}: ${contact.Email}`);
+                return contact.Email;
+            }
+        } catch (e) {
+            console.error(`Failed to fetch Contact(${contactId}):`, e.message);
+        }
+    }
+
+    // Try DivisionId as fallback
+    if (divisionId) {
+        try {
+            const division = await getDivision(divisionId);
+            const email = division?.Email || division?.ContactEmail;
+            if (email) {
+                console.log(`Found email via DivisionId ${divisionId}: ${email}`);
+                return email;
+            }
+        } catch (e) {
+            console.error(`Failed to fetch Division(${divisionId}):`, e.message);
+        }
+    }
+
+    return null;
 };
 
 // ─────────────────────────────────────────────
@@ -50,96 +81,59 @@ const handleSalesWebhook = async (req, res) => {
 
     try {
         const body = req.body;
-        console.log('Sales webhook received:', JSON.stringify(body));
+        console.log('Sales webhook received. Entity type:', body.entityType);
 
-        // Extraction Logic: Look inside createdEntity or updatedEntity
-        // In Prospect, 'quoteId' is often the field used for the SalesOrderHeaderId
+        // All key data is already in the createdEntity — no extra order API call needed
         const entity = body.createdEntity || body.updatedEntity || {};
-        const orderId = entity.quoteId || entity.SalesOrderHeaderId || body.SalesOrderHeaderId || body.id;
 
-        if (!orderId) {
-            console.log('No SalesOrderHeaderId or quoteId found in webhook payload. Skipping.');
+        const orderNumber = entity.orderNumber || entity.OrderNumber;
+        const opco       = entity.operatingCompanyCode || entity.OperatingCompanyCode || 'A';
+
+        if (!orderNumber) {
+            console.log('No orderNumber found in webhook payload. Skipping.');
             return;
         }
 
-        // Fetch full order details using our configured Prospect client
-        // We do NOT use entityODataLink as it points to a different domain (api-batch-v1)
-        // which may reject our auth token. We use our configured client instead.
-        const prospect = getProspectClient();
-        let orderData;
+        console.log(`Processing sale: ${orderNumber} (${opco})`);
 
-        try {
-            const orderNum = entity.orderNumber || entity.OrderNumber;
-            const opco = entity.operatingCompanyCode || entity.OperatingCompanyCode || 'A';
-            console.log(`Fetching order: OperatingCompanyCode=${opco}, OrderNumber=${orderNum}`);
-            const orderResponse = await prospect.get(
-                `/SalesOrderHeaders?$filter=OperatingCompanyCode eq '${opco}' and OrderNumber eq '${orderNum}'`
-            );
-            const results = orderResponse.data?.value || [];
-            if (results.length === 0) {
-                console.log(`Order ${orderNum} not found in Prospect. Skipping.`);
-                return;
-            }
-            orderData = results[0];
-            console.log('Order data fetched. Keys:', Object.keys(orderData).join(', '));
-        } catch (fetchErr) {
-            console.error('Failed to fetch order details:', fetchErr.response?.data || fetchErr.message);
-            return;
-        }
+        // Build order info from webhook payload (avoid extra API call)
+        const orderInfo = {
+            orderNumber:  orderNumber,
+            orderDate:    entity.orderDate   || entity.OrderDate   || new Date().toISOString(),
+            grossValue:   entity.grossValue  || entity.GrossValue  || 0,
+            netValue:     entity.netValue    || entity.NetValue    || 0,
+            orderStatus:  entity.statusflag  || entity.StatusFlag  || entity.orderStatus || ''
+        };
 
-        // Try to get contact email from order, then Contact, then Division
-        let contactEmail = orderData.Email || orderData.ContactEmail;
-
-        if (!contactEmail && orderData.ContactId) {
-            try {
-                const { getContact } = require('../services/prospect');
-                const contact = await getContact(orderData.ContactId);
-                contactEmail = contact.Email;
-                console.log(`Found email via ContactId: ${contactEmail}`);
-            } catch (e) {
-                console.error('Failed to fetch Contact:', e.message);
-            }
-        }
-
-        if (!contactEmail && orderData.DivisionId) {
-            try {
-                const { getDivision } = require('../services/prospect');
-                const division = await getDivision(orderData.DivisionId);
-                contactEmail = division.Email || division.ContactEmail;
-                console.log(`Found email via DivisionId: ${contactEmail}`);
-            } catch (e) {
-                console.error('Failed to fetch Division:', e.message);
-            }
-        }
+        // Get contact email
+        const contactId  = entity.contactId  || entity.ContactId  || null;
+        const divisionId = entity.divisionId || entity.DivisionId || null;
+        const contactEmail = await resolveContactEmail(contactId, divisionId);
 
         if (!contactEmail) {
-            console.log(`No email found for order ${orderId}. OrderData keys: ${Object.keys(orderData).join(', ')}`);
+            console.log(`⚠️ No contact email found for order ${orderNumber} (ContactId=${contactId}, DivisionId=${divisionId}). Skipping.`);
             return;
         }
 
-        // Validate email format
+        // Validate email
         if (!contactEmail.includes('@') || !contactEmail.includes('.')) {
-            console.log(`Invalid email '${contactEmail}' for order. Skipping.`);
+            console.log(`⚠️ Invalid email '${contactEmail}' for order ${orderNumber}. Skipping.`);
             return;
         }
 
-        console.log(`Processing sale ${orderId} for contact: ${contactEmail}`);
-
-        // Fetch all order lines (SKUs) using the orderNumber (composite key system)
-        const orderNumber = orderData.OrderNumber || orderData.orderNumber || entity.orderNumber;
-        const opco = orderData.OperatingCompanyCode || orderData.operatingCompanyCode || entity.operatingCompanyCode || 'A';
+        // Fetch order lines (SKUs) — filtered by OrderNumber + OperatingCompanyCode
         const orderLines = await getOrderLines(orderNumber, opco);
         if (!orderLines || orderLines.length === 0) {
-            console.log(`No order lines found for order ${orderNumber}. Skipping.`);
+            console.log(`⚠️ No order lines found for order ${orderNumber}. Skipping.`);
             return;
         }
 
         console.log(`Found ${orderLines.length} line item(s) for order ${orderNumber}. Pushing to Dotdigital...`);
 
-        // Push each line item as Insight Data to Dotdigital
-        await pushSaleToInsightData(contactEmail, orderData, orderLines);
+        // Push each line as Insight Data
+        await pushSaleToInsightData(contactEmail, orderInfo, orderLines);
 
-        console.log(`Sales Insight Data sync complete for order ${orderId}.`);
+        console.log(`✅ Sales sync complete for order ${orderNumber}.`);
 
     } catch (err) {
         console.error('Sales Webhook Error:', err.response?.data || err.message);
