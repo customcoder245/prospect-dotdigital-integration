@@ -4,44 +4,38 @@ const { getDotdigitalClient } = require('../services/dotdigital');
 const pushSaleToInsightData = async (contactEmail, orderInfo, orderLines) => {
     const client = getDotdigitalClient();
 
-    // 1. Ensure the contact exists in Dotdigital (prevents 404)
     try {
-        await client.post('/v2/contacts', {
-            Email: contactEmail,
-            OptInType: 'Unknown',
-            EmailType: 'Html'
-        });
-        console.log(`[Trace] Contact ensured: ${contactEmail}`);
-    } catch (e) {
-        // Already exists is fine
-    }
+        await client.post('/insightData/v3/collections/Orders?collectionScope=contact&collectionType=orders');
+    } catch (e) {}
 
-    // 2. Prepare the payload in the EXACT format Dotdigital "Orders" expects
-    const payload = {
-        id: orderInfo.orderNumber,
-        order_total: parseFloat(orderInfo.grossValue) || 0,
+    const productsArray = orderLines.map(line => ({
+        sku:   line.ProductCode || line.StockCode || 'N/A',
+        name:  line.Description || line.ProductCode || 'Product',
+        price: parseFloat(line.UnitPrice) || 0,
+        qty:   parseInt(line.Quantity) || 1
+    }));
+
+    const orderRecord = {
+        id:            orderInfo.orderNumber,
+        order_total:   parseFloat(orderInfo.grossValue) || 0,
         order_subtotal: parseFloat(orderInfo.netValue) || 0,
-        currency: orderInfo.currency || 'AUD',
-        purchase_date: orderInfo.orderDate, // ISO8601 string
-        order_status: orderInfo.orderStatus,
-        products: orderLines.map(line => ({
-            name: line.Description || line.ProductCode || 'Product',
-            price: parseFloat(line.UnitPrice) || 0,
-            sku: line.ProductCode || line.StockCode || 'N/A',
-            qty: parseInt(line.Quantity) || 1
-        }))
+        currency:      orderInfo.currency || 'AUD',
+        purchase_date: orderInfo.orderDate,
+        order_status:  orderInfo.orderStatus,
+        products:      productsArray
     };
 
     try {
-        // 3. Push to "Orders" collection using the stable v2 endpoint
-        // Note: Capital "O" in Orders to match your account's collection name
-        const url = `/v2/contacts/${contactEmail}/insight-data/Orders/${orderInfo.orderNumber}`;
-        await client.post(url, payload);
-        console.log(`✅ Success: Order ${orderInfo.orderNumber} synced to Dotdigital`);
-        return true;
+        await client.post(`/insightData/v3/records`, {
+            collectionName: 'Orders',
+            contactIdentifier: contactEmail,
+            key: orderInfo.orderNumber,
+            json: JSON.stringify(orderRecord)
+        });
+        return { success: true };
     } catch (e) {
-        console.error(`❌ Push failed for ${orderInfo.orderNumber}:`, e.response?.data || e.message);
-        return false;
+        const errorMsg = e.response?.data?.message || e.response?.data || e.message;
+        return { success: false, error: errorMsg };
     }
 };
 
@@ -50,12 +44,9 @@ const handleSalesWebhook = async (req, res) => {
         const entity = req.body.createdEntity || req.body.updatedEntity || {};
         const orderNumber = entity.orderNumber || entity.OrderNumber;
         const quoteId = entity.quoteId || entity.QuoteId;
-
         if (!orderNumber) return res.json({ status: 'no_order' });
 
         const prospect = getProspectClient();
-        console.log(`Processing Order: ${orderNumber} (QuoteId=${quoteId})`);
-
         let contactId = null;
         if (quoteId) {
             try {
@@ -70,11 +61,9 @@ const handleSalesWebhook = async (req, res) => {
             const con = await getContact(contactId);
             contactEmail = con?.Email || con?.email;
         }
-
         if (!contactEmail) return res.json({ status: 'no_email', contactId });
 
         const lines = await getOrderLines(quoteId);
-        
         const orderInfo = {
             orderNumber,
             orderDate: entity.orderDate || entity.OrderDate || new Date().toISOString(),
@@ -84,15 +73,15 @@ const handleSalesWebhook = async (req, res) => {
             orderStatus: entity.orderStatus || entity.OrderStatus || 'Placed'
         };
 
-        const success = await pushSaleToInsightData(contactEmail, orderInfo, lines);
+        const result = await pushSaleToInsightData(contactEmail, orderInfo, lines);
         return res.json({ 
-            status: success ? 'ok' : 'error', 
+            status: result.success ? 'ok' : 'error', 
+            message: result.error,
             contact: contactEmail,
             orderId: orderNumber 
         });
 
     } catch (err) {
-        console.error('Final Sales Error:', err.message);
         return res.json({ status: 'error', message: err.message });
     }
 };
