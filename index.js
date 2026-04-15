@@ -89,7 +89,8 @@ app.get('/test/sales-force', async (req, res) => {
             }
         };
         const mockRes = {
-            status: (code) => ({ json: (data) => res.status(code).json(data) })
+            status: (code) => ({ json: (data) => res.status(code).json(data) }),
+            json: (data) => res.json(data)
         };
         return handleSalesWebhook(mockReq, mockRes);
     }

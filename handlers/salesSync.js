@@ -59,18 +59,32 @@ const handleSalesWebhook = async (req, res) => {
         console.log(`Looking for email using ID: ${targetId}`);
 
         let contactEmail = null;
-        if (targetId) {
+        
+        // 1. Try ContactId
+        if (contactId) {
             try {
-                // Try Division/Account lookup first
+                const con = await getContact(contactId);
+                contactEmail = con?.Email || con?.email;
+            } catch (e) {}
+        }
+
+        // 2. Try searching Contacts by AccountsId (very reliable)
+        if (!contactEmail && targetId) {
+            try {
+                console.log(`[Step 3] Searching Contacts for AccountsId: ${targetId}`);
+                const searchRes = await prospect.get(`/Contacts?$filter=AccountsId eq '${targetId}'`);
+                const matched = searchRes.data?.value?.[0];
+                contactEmail = matched?.Email || matched?.email;
+                if (contactEmail) console.log(`[Step 3 OK] Found email via Contact Search: ${contactEmail}`);
+            } catch (e) { console.log(`Search error: ${e.message}`); }
+        }
+
+        // 3. Try DivisionId fallback
+        if (!contactEmail && targetId) {
+            try {
                 const div = await getDivision(targetId);
                 contactEmail = div?.Email || div?.ContactEmail;
-                
-                // If not found, try Contact lookup
-                if (!contactEmail) {
-                    const con = await getContact(targetId);
-                    contactEmail = con?.Email || con?.email;
-                }
-            } catch (e) { console.log(`ID lookup error: ${e.message}`); }
+            } catch (e) {}
         }
 
         if (!contactEmail) {
