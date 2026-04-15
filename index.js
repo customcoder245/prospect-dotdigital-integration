@@ -57,6 +57,25 @@ app.post('/webhook/sales', handleSalesWebhook); // Sales History (Insight Data)
 app.get('/sync/suppressed', handleSuppressionSync);
 app.get('/sync/bulk-prospect', handleBulkSync);
 
+// ── FINAL TEST: Manual Trigger ──────────────────────────────────────────────
+app.get('/test/sales-final', async (req, res) => {
+    const { handleSalesWebhook } = require('./handlers/salesSync');
+    const mockReq = {
+        body: {
+            createdEntity: {
+                orderNumber: req.query.order || 'SO-00085227',
+                operatingCompanyCode: req.query.opco || 'A',
+                quoteId: req.query.quoteId || '13862'
+            }
+        }
+    };
+    const mockRes = {
+        status: (code) => ({ json: (data) => res.status(code).json(data) }),
+        json: (data) => res.json(data)
+    };
+    return handleSalesWebhook(mockReq, mockRes);
+});
+
 // Automated Sync Dashboard
 app.get('/sync/dashboard', (req, res) => {
     res.send(`
