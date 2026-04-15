@@ -9,24 +9,28 @@ app.use(bodyParser.json({ type: 'text/json' }));
 
 app.get('/health', async (req, res) => {
   const { getDotdigitalClient } = require('./services/dotdigital');
-  const { getSalesOrderHeader } = require('./services/prospect');
+  const { getSalesOrderHeader, getOrderLines } = require('./services/prospect');
   const ddClient = getDotdigitalClient();
   const diagnostics = {};
 
-  // 1. Current State
   try {
     const listRes = await ddClient.get('/insightData/v3/collections');
     diagnostics.current_collections = listRes.data;
   } catch (e) { diagnostics.current_collections = { error: e.message }; }
 
-  // 2. Specific Order Debug
   if (req.query.order) {
     try {
         const liveOrder = await getSalesOrderHeader(req.query.order);
         diagnostics.prospect_raw_order = liveOrder;
         
+        const qId = liveOrder.QuoteId || req.query.quoteId;
+        if (qId) {
+            const lines = await getOrderLines(qId);
+            diagnostics.prospect_raw_lines = lines;
+        }
+        
         const { handleSalesWebhook } = require('./handlers/salesSync');
-        const mockReq = { body: { createdEntity: { orderNumber: req.query.order, quoteId: req.query.quoteId } } };
+        const mockReq = { body: { createdEntity: { orderNumber: req.query.order, quoteId: qId } } };
         const mockRes = { 
             status: (code) => { diagnostics.sync_status_code = code; return { json: (d) => diagnostics.sync_result = d }; },
             json: (data) => { diagnostics.sync_result = data; }
@@ -38,7 +42,7 @@ app.get('/health', async (req, res) => {
     return res.json({ status: 'diagnostic_run', diagnostics });
   }
 
-  res.json({ status: 'ok', version: '5.2.0-PROSPECT-DEBUG', diagnostics });
+  res.json({ status: 'ok', version: '5.3.0-LINES-DEBUG', diagnostics });
 });
 
 // Handlers
