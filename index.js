@@ -70,6 +70,12 @@ app.get('/test/sales-force', async (req, res) => {
     const client = getProspectClient();
     const results = {};
 
+    // Test 0.0: List ALL available tables/collections
+    try {
+        const r00 = await client.get('/');
+        results.available_tables = r00.data?.value?.map(t => t.name) || 'no tables found';
+    } catch (e) { results.available_tables = { error: e.message }; }
+
     // Test 0: Get FULL Quote data for inspection
     try {
         const r0 = await client.get(`/Quotes(QuoteId=${qId})`);
