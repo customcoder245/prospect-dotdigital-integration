@@ -48,10 +48,12 @@ const getAddress = async (id) => {
     return response.data;
 };
 
-// Function: Get order lines for a sales order
-const getOrderLines = async (orderId) => {
+// Function: Get order lines for a sales order (using composite key)
+const getOrderLines = async (orderNumber, opco = 'A') => {
     const client = getProspectClient();
-    const response = await client.get(`/SalesOrderLines?$filter=SalesOrderHeaderId eq ${orderId}`);
+    const response = await client.get(
+        `/SalesOrderLines?$filter=OrderNumber eq '${orderNumber}' and OperatingCompanyCode eq '${opco}'`
+    );
     return response.data.value || [];
 };
 

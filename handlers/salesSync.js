@@ -8,21 +8,22 @@ const pushSaleToInsightData = async (contactEmail, orderData, orderLines) => {
     const client = getDotdigitalClient();
 
     // Build one record per SKU (line item) as Dotdigital expects
+    // Using orderNumber as part of the key since Prospect uses composite keys
     for (const line of orderLines) {
-        const insightRecord = {
-            key: `${orderData.SalesOrderHeaderId}-${line.SalesOrderLineId}`, // Unique key per line
-            contactIdentifier: contactEmail,
-            json: {
-                orderNumber: orderData.SalesOrderNumber || orderData.SalesOrderHeaderId,
-                orderDate: orderData.DateCreated || orderData.DateModified || new Date().toISOString(),
-                sku: line.ProductCode || line.StockCode || '',
-                productDescription: line.ProductDescription || '',
-                quantity: line.Quantity || 1,
-                unitPrice: line.UnitPrice || 0,
-                lineTotal: line.LineTotal || (line.Quantity * line.UnitPrice) || 0,
-                orderStatus: orderData.Status || '',
-                totalOrderValue: orderData.TotalValue || orderData.Value || 0
-            }
+        const orderNum = orderData.OrderNumber || orderData.orderNumber || orderData.SalesOrderHeaderId || 'unknown';
+        const lineId = line.OrderLineId || line.SalesOrderLineId || line.lineId || Math.random();
+        const uniqueKey = `${orderNum}-${lineId}`;
+
+        const insightJson = {
+            orderNumber: orderNum,
+            orderDate: orderData.OrderDate || orderData.orderDate || orderData.DateCreated || new Date().toISOString(),
+            sku: line.ProductCode || line.StockCode || line.productCode || '',
+            productDescription: line.ProductDescription || line.description || '',
+            quantity: line.Quantity || line.quantity || 1,
+            unitPrice: line.UnitPrice || line.unitPrice || 0,
+            lineTotal: line.LineTotal || line.lineTotal || (line.Quantity * line.UnitPrice) || 0,
+            orderStatus: orderData.OrderStatus || orderData.statusflag || orderData.Status || '',
+            totalOrderValue: orderData.GrossValue || orderData.grossValue || orderData.TotalValue || 0
         };
 
         try {
@@ -30,12 +31,12 @@ const pushSaleToInsightData = async (contactEmail, orderData, orderLines) => {
             await client.post('/v3/insight-data/records', {
                 collectionName: 'Orders',
                 contactIdentifier: contactEmail,
-                key: insightRecord.key,
-                json: JSON.stringify(insightRecord.json)
+                key: uniqueKey,
+                json: JSON.stringify(insightJson)
             });
-            console.log(`Insight Data pushed for SKU: ${line.ProductCode} | Order: ${orderData.SalesOrderHeaderId}`);
+            console.log(`Insight Data pushed for SKU: ${insightJson.sku} | Order: ${orderNum}`);
         } catch (err) {
-            console.error(`Failed to push Insight Data for line ${line.SalesOrderLineId}:`, err.response?.data || err.message);
+            console.error(`Failed to push Insight Data for line ${uniqueKey}:`, err.response?.data || err.message);
         }
     }
 };
@@ -61,11 +62,25 @@ const handleSalesWebhook = async (req, res) => {
             return;
         }
 
-        // Fetch full order details from Prospect CRM
+        // Fetch full order details using the direct OData link from the webhook
+        // This avoids issues with composite keys in SalesOrderHeaders
         const prospect = getProspectClient();
-        const orderResponse = await prospect.get(
-            `/SalesOrderHeaders(SalesOrderHeaderId=${orderId})?$expand=Contact`
-        );
+        let orderResponse;
+
+        if (body.entityODataLink) {
+            // Use the exact URL provided by the webhook (most reliable)
+            console.log(`Fetching order from: ${body.entityODataLink}`);
+            orderResponse = await prospect.get(body.entityODataLink + '?$expand=Contact');
+        } else {
+            // Fallback: use the orderNumber from the entity
+            const orderNumber = entity.orderNumber || entity.OrderNumber;
+            const opco = entity.operatingCompanyCode || entity.OperatingCompanyCode || 'A';
+            console.log(`Fetching order: OperatingCompanyCode=${opco}, OrderNumber=${orderNumber}`);
+            orderResponse = await prospect.get(
+                `/SalesOrderHeaders(OperatingCompanyCode=${opco},OrderNumber=${orderNumber})?$expand=Contact`
+            );
+        }
+
         const orderData = orderResponse.data;
 
         // Get the contact email from the expanded Contact data
@@ -83,14 +98,16 @@ const handleSalesWebhook = async (req, res) => {
 
         console.log(`Processing sale ${orderId} for contact: ${contactEmail}`);
 
-        // Fetch all order lines (SKUs) for this order
-        const orderLines = await getOrderLines(orderId);
+        // Fetch all order lines (SKUs) using the orderNumber (composite key system)
+        const orderNumber = orderData.OrderNumber || orderData.orderNumber || entity.orderNumber;
+        const opco = orderData.OperatingCompanyCode || orderData.operatingCompanyCode || entity.operatingCompanyCode || 'A';
+        const orderLines = await getOrderLines(orderNumber, opco);
         if (!orderLines || orderLines.length === 0) {
-            console.log(`No order lines found for order ${orderId}. Skipping.`);
+            console.log(`No order lines found for order ${orderNumber}. Skipping.`);
             return;
         }
 
-        console.log(`Found ${orderLines.length} line item(s) for order ${orderId}. Pushing to Dotdigital...`);
+        console.log(`Found ${orderLines.length} line item(s) for order ${orderNumber}. Pushing to Dotdigital...`);
 
         // Push each line item as Insight Data to Dotdigital
         await pushSaleToInsightData(contactEmail, orderData, orderLines);
