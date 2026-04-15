@@ -62,25 +62,26 @@ const handleSalesWebhook = async (req, res) => {
             return;
         }
 
-        // Fetch full order details using the direct OData link from the webhook
-        // Note: $expand=Contact is NOT used as it may not be supported on all endpoints
+        // Fetch full order details using our configured Prospect client
+        // We do NOT use entityODataLink as it points to a different domain (api-batch-v1)
+        // which may reject our auth token. We use our configured client instead.
         const prospect = getProspectClient();
         let orderData;
 
         try {
-            let orderResponse;
-            if (body.entityODataLink) {
-                console.log(`Fetching order from: ${body.entityODataLink}`);
-                orderResponse = await prospect.get(body.entityODataLink);
-            } else {
-                const orderNumber = entity.orderNumber || entity.OrderNumber;
-                const opco = entity.operatingCompanyCode || entity.OperatingCompanyCode || 'A';
-                orderResponse = await prospect.get(
-                    `/SalesOrderHeaders(OperatingCompanyCode=${opco},OrderNumber=${orderNumber})`
-                );
+            const orderNum = entity.orderNumber || entity.OrderNumber;
+            const opco = entity.operatingCompanyCode || entity.OperatingCompanyCode || 'A';
+            console.log(`Fetching order: OperatingCompanyCode=${opco}, OrderNumber=${orderNum}`);
+            const orderResponse = await prospect.get(
+                `/SalesOrderHeaders?$filter=OperatingCompanyCode eq '${opco}' and OrderNumber eq '${orderNum}'`
+            );
+            const results = orderResponse.data?.value || [];
+            if (results.length === 0) {
+                console.log(`Order ${orderNum} not found in Prospect. Skipping.`);
+                return;
             }
-            orderData = orderResponse.data;
-            console.log('Order data fetched successfully. Keys:', Object.keys(orderData).join(', '));
+            orderData = results[0];
+            console.log('Order data fetched. Keys:', Object.keys(orderData).join(', '));
         } catch (fetchErr) {
             console.error('Failed to fetch order details:', fetchErr.response?.data || fetchErr.message);
             return;
