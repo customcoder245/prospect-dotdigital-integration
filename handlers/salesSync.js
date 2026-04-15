@@ -46,35 +46,47 @@ const handleSalesWebhook = async (req, res) => {
         const prospect = getProspectClient();
         console.log(`Processing Order: ${orderNumber} (QuoteId=${quoteId})`);
 
-        // 1. Get the Contact ID from the Quote (This is the most accurate place)
+        // 1. Get the Contact ID from the Quote
         let contactId = null;
         if (quoteId) {
             try {
+                console.log(`[Trace] Fetching Quote: /Quotes(QuoteId=${quoteId})`);
                 const qRes = await prospect.get(`/Quotes(QuoteId=${quoteId})`);
-                const qData = qRes.data.value ? qRes.data.value[0] : qRes.data;
+                const qResp = qRes.data;
+                const qData = qResp.value ? qResp.value[0] : qResp;
                 contactId = qData.ContactId || qData.CreatedContact || null;
-                console.log(`Contact ID found in Quote: ${contactId}`);
-            } catch (e) { console.log(`Quote fetch error: ${e.message}`); }
+                console.log(`[Trace] ContactId found: ${contactId}`);
+            } catch (e) { console.error(`[Trace ERROR] Quote fetch failed: ${e.message} URL: /Quotes(QuoteId=${quoteId})`); }
         }
 
         // 2. Resolve Email
         let contactEmail = null;
         if (contactId) {
             try {
-                // In OData, integer IDs like 61744 don't need quotes
+                console.log(`[Trace] Fetching Contact: /Contacts?$filter=ContactId eq ${contactId}`);
                 const con = await getContact(contactId);
                 contactEmail = con?.Email || con?.email;
-                if (contactEmail) console.log(`Found email via ContactId ${contactId}: ${contactEmail}`);
-            } catch (e) { console.log(`Contact ID lookup failed: ${e.message}`); }
+                console.log(`[Trace] Email resolved: ${contactEmail}`);
+            } catch (e) {
+                console.error(`[Trace ERROR] Contact lookup failed: ${e.message} URL: /Contacts?$filter=ContactId eq ${contactId}`);
+                throw new Error(`Contact API Failed: ${e.message}`);
+            }
         }
 
         if (!contactEmail) {
-            console.log(`Final check: No email found for Order ${orderNumber}`);
             return res.json({ status: 'no_email', contactId });
         }
 
-        // 3. Get Lines and Push
-        const orderLines = await getOrderLines(orderNumber, opco);
+        // 3. Get Lines
+        let orderLines = [];
+        try {
+            console.log(`[Trace] Fetching Lines: /SalesOrderLines?$filter=OrderNumber eq '${orderNumber}'...`);
+            orderLines = await getOrderLines(orderNumber, opco);
+            console.log(`[Trace] Lines found: ${orderLines.length}`);
+        } catch (e) {
+            console.error(`[Trace ERROR] Lines fetch failed: ${e.message}`);
+            throw new Error(`Lines API Failed: ${e.message}`);
+        }
         const orderInfo  = {
             orderNumber,
             orderDate:   entity.orderDate || new Date().toISOString(),
