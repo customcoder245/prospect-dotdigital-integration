@@ -57,13 +57,36 @@ app.post('/webhook/sales', handleSalesWebhook); // Sales History (Insight Data)
 app.get('/sync/suppressed', handleSuppressionSync);
 app.get('/sync/bulk-prospect', handleBulkSync);
 
-// ── DEBUG: Test SalesOrderHeaders API connectivity ──────────────────────────
+// ── DEBUG: Test SalesOrderHeaders API connectivity & Manual Sync ────────────
 app.get('/test/sales-api', async (req, res) => {
     const { getProspectClient } = require('./services/prospect');
-    const orderNumber = req.query.order || 'SO-00085215';
+    const { handleSalesWebhook } = require('./handlers/salesSync');
+    
+    const orderNumber = req.query.order || 'SO-00085223';
     const opco = req.query.opco || 'A';
+    const doSync = req.query.sync === 'true';
+
+    // If sync=true requested, we mock a webhook payload and call the real handler
+    if (doSync) {
+        console.log(`Manual Sync Triggered for ${orderNumber}`);
+        const mockReq = {
+            body: {
+                createdEntity: {
+                    orderNumber: orderNumber,
+                    operatingCompanyCode: opco,
+                    quoteId: req.query.quoteId // Optional: helps find contact faster
+                }
+            }
+        };
+        const mockRes = {
+            status: (code) => ({ json: (data) => res.status(code).json(data) })
+        };
+        return handleSalesWebhook(mockReq, mockRes);
+    }
+
     const client = getProspectClient();
     const results = {};
+    // ... rest of the existing test logic for viewing data ...
 
     // Test 1: Can we reach SalesOrderHeaders at all?
     try {
