@@ -54,13 +54,15 @@ const handleSalesWebhook = async (req, res) => {
             return res.json({ status: 'not_found' });
         }
 
-        // 2. Find the email using the AccountsId (most reliable ID)
-        const targetId = orderData.AccountsId || orderData.DivisionId || orderData.ContactId;
-        console.log(`Looking for email using ID: ${targetId}`);
+        // 2. Find the email using any ID available
+        const contactId = orderData.ContactId || orderData.contactId || null;
+        const targetId  = orderData.AccountsId || orderData.DivisionId || contactId;
+        
+        console.log(`Looking for email. ContactId: ${contactId}, TargetId (Account/Div): ${targetId}`);
 
         let contactEmail = null;
         
-        // 1. Try ContactId
+        // 1. Try ContactId first
         if (contactId) {
             try {
                 const con = await getContact(contactId);
