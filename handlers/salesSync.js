@@ -7,11 +7,23 @@ const { getDotdigitalClient } = require('../services/dotdigital');
 const pushSaleToInsightData = async (contactEmail, orderInfo, orderLines) => {
     const client = getDotdigitalClient();
 
-    // Ensure "Orders" collection exists (v3 call, but record push is v2)
+    // 1. Ensure the Contact exists in Dotdigital (prevents 404)
+    try {
+        await client.post('/v2/contacts', {
+            Email: contactEmail,
+            OptInType: 'Unknown',
+            EmailType: 'Html'
+        });
+    } catch (e) {
+        // 409 Conflict is fine (means contact already exists)
+    }
+
+    // 2. Ensure "Orders" collection exists
     try {
         await client.post('/insightData/v3/collections/Orders?collectionScope=contact&collectionType=orders');
     } catch (e) {}
 
+    // 3. Push Line Items
     for (const line of orderLines) {
         const sku    = line.ProductCode || line.StockCode || 'N/A';
         const lineId = line.OrderLineId || Math.random().toString(36);
@@ -28,7 +40,6 @@ const pushSaleToInsightData = async (contactEmail, orderInfo, orderLines) => {
         };
 
         try {
-            // Use the stable v2 endpoint for the actual record push
             await client.post(`/v2/contacts/${contactEmail}/insight-data/Orders/${key}`, record);
             console.log(`✅ Success: SKU ${sku} pushed for ${contactEmail}`);
         } catch (e) {
@@ -55,8 +66,6 @@ const handleSalesWebhook = async (req, res) => {
         if (quoteId) {
             try {
                 const qRes = await prospect.get(`/Quotes(QuoteId=${quoteId})`);
-                const qData = qRes.data.value ? qRes.data.value[3] : qRes.data; // Note: adjusted to check index or record
-                // Recovery: If it's a list, find the record with correct QuoteId
                 const actualData = qRes.data.value ? qRes.data.value.find(q => q.QuoteId == quoteId) || qRes.data.value[0] : qRes.data;
                 contactId = actualData.ContactId || actualData.CreatedContact || null;
             } catch (e) { console.log(`Quote fetch error: ${e.message}`); }
