@@ -1,4 +1,4 @@
-const { getProspectClient, getOrderLines, getContact } = require('../services/prospect');
+const { getProspectClient, getOrderLines, getContact, getDivision } = require('../services/prospect');
 const { getDotdigitalClient } = require('../services/dotdigital');
 
 // ─────────────────────────────────────────────
@@ -6,156 +6,95 @@ const { getDotdigitalClient } = require('../services/dotdigital');
 // ─────────────────────────────────────────────
 const pushSaleToInsightData = async (contactEmail, orderInfo, orderLines) => {
     const client = getDotdigitalClient();
-
     for (const line of orderLines) {
-        const sku    = line.ProductCode   || line.StockCode   || line.productCode   || '';
-        const lineId = line.OrderLineId   || line.SalesOrderLineId || sku || Math.random().toString(36);
+        const sku    = line.ProductCode || line.StockCode || '';
+        const lineId = line.OrderLineId || Math.random().toString(36);
         const key    = `${orderInfo.orderNumber}-${lineId}`;
-
-        const insightJson = {
-            orderNumber:        orderInfo.orderNumber,
-            orderDate:          orderInfo.orderDate,
-            sku:                sku,
-            productDescription: line.ProductDescription || line.description || '',
-            quantity:           line.Quantity  || line.quantity  || 1,
-            unitPrice:          line.UnitPrice || line.unitPrice || 0,
-            lineTotal:          line.LineTotal || line.lineTotal || 0,
-            orderStatus:        orderInfo.orderStatus,
-            totalOrderValue:    orderInfo.grossValue
+        const json   = {
+            orderNumber: orderInfo.orderNumber,
+            orderDate:   orderInfo.orderDate,
+            sku:         sku,
+            quantity:    line.Quantity || 1,
+            unitPrice:   line.UnitPrice || 0,
+            orderStatus: orderInfo.orderStatus,
+            totalOrderValue: orderInfo.grossValue
         };
-
         try {
             await client.post('/v3/insight-data/records', {
                 collectionName: 'Orders',
                 contactIdentifier: contactEmail,
                 key,
-                json: JSON.stringify(insightJson)
+                json: JSON.stringify(json)
             });
-            console.log(`✅ Insight pushed: SKU=${sku} | Order=${orderInfo.orderNumber} | Contact=${contactEmail}`);
-        } catch (err) {
-            console.error(`❌ Failed Insight push [${key}]:`, err.response?.data || err.message);
-        }
+            console.log(`✅ Pushed SKU ${sku} for ${contactEmail}`);
+        } catch (e) { console.error(`❌ Push failed: ${e.message}`); }
     }
 };
 
 // ─────────────────────────────────────────────
-// Main webhook handler for SalesOrderHeader
-// NOTE: We process FIRST, then respond.
-// Prospect waits up to 30s — this is safe.
+// Real-time Sales Handler
 // ─────────────────────────────────────────────
 const handleSalesWebhook = async (req, res) => {
     try {
-        const body   = req.body;
-        const entity = body.createdEntity || body.updatedEntity || {};
-
+        const entity = req.body.createdEntity || req.body.updatedEntity || {};
         const orderNumber = entity.orderNumber || entity.OrderNumber;
-        const opco        = entity.operatingCompanyCode || entity.OperatingCompanyCode || 'A';
-        // quoteId is the Prospect CRM internal Quote ID — it HAS a ContactId
-        const quoteId     = entity.quoteId || entity.QuoteId;
+        const opco = entity.operatingCompanyCode || entity.OperatingCompanyCode || 'A';
 
-        console.log(`Sales webhook: ${orderNumber} (${opco}), QuoteId=${quoteId}`);
-
-        if (!orderNumber) {
-            console.log('No orderNumber in webhook. Skipping.');
-            return res.status(200).json({ status: 'skipped', reason: 'no orderNumber' });
-        }
+        if (!orderNumber) return res.json({ status: 'no_order' });
 
         const prospect = getProspectClient();
+        console.log(`Processing Order: ${orderNumber}`);
 
-        // ── Step 1: Get ALL possible IDs ──────────────────────────────────────
-        let contactId  = null;
-        let divisionId = entity.divisionId || entity.DivisionId || null;
-        let accountsId = entity.accountsId || entity.AccountsId || null;
+        // 1. Fetch the full order to get the correct IDs
+        const orderRes = await prospect.get(`/SalesOrderHeaders?$filter=OrderNumber eq '${orderNumber}' and OperatingCompanyCode eq '${opco}'`);
+        const orderData = orderRes.data?.value?.[0];
 
-        if (quoteId) {
-            try {
-                console.log(`[Step 1] Fetching Quote(${quoteId})...`);
-                const quoteRes = await prospect.get(`/Quotes(QuoteId=${quoteId})`);
-                const qResp = quoteRes.data;
-                const qData = qResp.value ? qResp.value[0] : qResp;
-                
-                if (qData) {
-                    contactId  = qData.ContactId  || qData.contactId  || null;
-                    divisionId = divisionId || qData.DivisionId || qData.divisionId || null;
-                    accountsId = accountsId || qData.AccountsId || qData.accountsId || null;
-                    console.log(`[Step 1 OK] IDs found: ContactId=${contactId}, DivisionId=${divisionId}, AccountsId=${accountsId}`);
-                } else {
-                    console.log(`[Step 1 OK] No data found in Quote response.`);
-                }
-            } catch (e) {
-                console.error('[Step 1 Error] Quote lookup failed:', e.message);
-            }
+        if (!orderData) {
+            console.log(`Order ${orderNumber} not found.`);
+            return res.json({ status: 'not_found' });
         }
 
-        // ── Step 2: Build Order Info ──────────────────────────────────────────
-        const orderInfo = {
-            orderNumber: orderNumber,
-            orderDate:   entity.orderDate  || entity.OrderDate  || new Date().toISOString(),
-            grossValue:  entity.grossValue || entity.GrossValue || 0,
-            netValue:    entity.netValue   || entity.NetValue   || 0,
-            orderStatus: entity.statusflag || entity.StatusFlag || entity.orderStatus || ''
-        };
+        // 2. Find the email using the AccountsId (most reliable ID)
+        const targetId = orderData.AccountsId || orderData.DivisionId || orderData.ContactId;
+        console.log(`Looking for email using ID: ${targetId}`);
 
-        // ── Step 3: Get contact email using ANY ID found ──────────────────────
         let contactEmail = null;
-        
-        // Try ContactId
-        if (contactId) {
+        if (targetId) {
             try {
-                const contact = await getContact(contactId);
-                contactEmail = contact?.Email || contact?.email;
-                if (contactEmail) console.log(`[Step 3] Found email via ContactId: ${contactEmail}`);
-            } catch (e) {}
-        }
-
-        // Try DivisionId fallback
-        if (!contactEmail && divisionId) {
-            try {
-                const { getDivision } = require('../services/prospect');
-                const div = await getDivision(divisionId);
+                // Try Division/Account lookup first
+                const div = await getDivision(targetId);
                 contactEmail = div?.Email || div?.ContactEmail;
-                if (contactEmail) console.log(`[Step 3] Found email via DivisionId: ${contactEmail}`);
-            } catch (e) {}
-        }
-
-        // Try AccountsId fallback (often used for Companies)
-        if (!contactEmail && accountsId) {
-            try {
-                const { getDivision } = require('../services/prospect');
-                const div = await getDivision(accountsId);
-                contactEmail = div?.Email || div?.ContactEmail;
-                if (contactEmail) console.log(`[Step 3] Found email via AccountsId: ${contactEmail}`);
-            } catch (e) {}
+                
+                // If not found, try Contact lookup
+                if (!contactEmail) {
+                    const con = await getContact(targetId);
+                    contactEmail = con?.Email || con?.email;
+                }
+            } catch (e) { console.log(`ID lookup error: ${e.message}`); }
         }
 
         if (!contactEmail) {
-            console.log(`⚠️ No email found for order ${orderNumber}. Skipping Dotdigital push.`);
-            return res.status(200).json({ status: 'skipped', reason: 'no contact email' });
+            console.log(`Could not find email for ID ${targetId}`);
+            return res.json({ status: 'no_email' });
         }
 
-        if (!contactEmail.includes('@') || !contactEmail.includes('.')) {
-            console.log(`⚠️ Invalid email '${contactEmail}'. Skipping.`);
-            return res.status(200).json({ status: 'skipped', reason: 'invalid email' });
-        }
-
-        // ── Step 4: Get Order Lines (SKUs) ────────────────────────────────────
-        console.log(`[Step 4] Fetching order lines for ${orderNumber}...`);
+        // 3. Get Lines and Push
         const orderLines = await getOrderLines(orderNumber, opco);
-        console.log(`[Step 4 OK] Found ${orderLines.length} line(s).`);
+        const orderInfo  = {
+            orderNumber,
+            orderDate:   orderData.OrderDate || new Date().toISOString(),
+            grossValue:  orderData.GrossValue || 0,
+            orderStatus: orderData.OrderStatus || 'Placed'
+        };
 
-        if (orderLines.length === 0) {
-            return res.status(200).json({ status: 'skipped', reason: 'no order lines' });
-        }
-
-        // ── Step 5: Push to Dotdigital Insight Data ────────────────────────────
         await pushSaleToInsightData(contactEmail, orderInfo, orderLines);
-        console.log(`✅ Sales sync complete for order ${orderNumber}.`);
-
-        return res.status(200).json({ status: 'ok', order: orderNumber, contact: contactEmail, lines: orderLines.length });
+        
+        console.log(`✅ Success: ${orderNumber} synced to ${contactEmail}`);
+        return res.json({ status: 'ok', contact: contactEmail });
 
     } catch (err) {
-        console.error('Sales Webhook Error:', err.response?.data || err.message);
-        return res.status(200).json({ status: 'error', message: err.message });
+        console.error('Final Sales Error:', err.message);
+        return res.json({ status: 'error', message: err.message });
     }
 };
 
