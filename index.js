@@ -94,8 +94,6 @@ app.get('/test/sales-force', async (req, res) => {
         return handleSalesWebhook(mockReq, mockRes);
     }
 
-    const client = getProspectClient();
-    const results = {};
     // ... rest of the existing test logic for viewing data ...
 
     // Test 1: Can we reach SalesOrderHeaders at all?
