@@ -1,13 +1,12 @@
-const { getProspectClient, getOrderLines, getContact, getSalesOrderHeader } = require('../services/prospect');
+const { getOrderLines, getContact, getSalesOrderHeader, getProspectClient } = require('../services/prospect');
 const { getDotdigitalClient } = require('../services/dotdigital');
 
-// ─────────────────────────────────────────────
-// Push Insight Data to Dotdigital
-// ─────────────────────────────────────────────
+/**
+ * Pushes a Sales Order to Dotdigital Insight Data using the v3 PUT endpoint.
+ */
 const pushSaleToInsightData = async (contactEmail, orderInfo, orderLines) => {
     const client = getDotdigitalClient();
 
-    // 1. Prepare products array with VERIFIED Prospect fields
     const productsArray = orderLines.map(line => ({
         sku:   line.ProductItemId || line.StockCode || 'N/A',
         name:  line.Description || line.ProductItemId || 'Product',
@@ -15,45 +14,42 @@ const pushSaleToInsightData = async (contactEmail, orderInfo, orderLines) => {
         qty:   parseFloat(line.DecimalQuantity) || parseFloat(line.Quantity) || 1
     }));
 
-    // 2. Prepare Order Record
     const orderRecord = {
-        id:            orderInfo.orderNumber,
-        order_total:   parseFloat(orderInfo.grossValue) || 0,
+        id:             orderInfo.orderNumber,
+        order_total:    parseFloat(orderInfo.grossValue) || 0,
         order_subtotal: parseFloat(orderInfo.netValue) || 0,
-        currency:      orderInfo.currency || 'AUD',
-        purchase_date: orderInfo.orderDate,
-        order_status:  orderInfo.orderStatus,
-        products:      productsArray
+        currency:       orderInfo.currency || 'AUD',
+        purchase_date:  orderInfo.orderDate,
+        order_status:   orderInfo.orderStatus,
+        products:       productsArray
     };
 
     try {
-        // v3 PUT endpoint - /insightData/v3/contacts/email/{email}/Orders/{recordId}
         await client.put(`/insightData/v3/contacts/email/${contactEmail}/Orders/${orderInfo.orderNumber}`, orderRecord);
-        console.log(`✅ Success: Sync complete for ${orderInfo.orderNumber}`);
         return { success: true };
     } catch (e) {
-        const errorMsg = e.response?.data?.message || e.response?.data || e.message;
-        console.error(`❌ v3 PUT failed:`, errorMsg);
+        const errorMsg = e.response?.data?.message || e.message;
+        console.error(`[Dotdigital Error] ${orderInfo.orderNumber}:`, errorMsg);
         return { success: false, error: errorMsg };
     }
 };
 
-// ─────────────────────────────────────────────
-// Real-time Sales Handler
-// ─────────────────────────────────────────────
+/**
+ * Main Webhook Handler for Sales Orders
+ */
 const handleSalesWebhook = async (req, res) => {
     try {
         const entity = req.body.createdEntity || req.body.updatedEntity || {};
         const orderNumber = entity.orderNumber || entity.OrderNumber;
         const quoteIdInput = entity.quoteId || entity.QuoteId;
 
-        if (!orderNumber) return res.json({ status: 'no_order_id' });
+        if (!orderNumber) return res.status(200).json({ status: 'ignored', reason: 'no_order_number' });
 
-        // 1. Fetch FULL Order Header from Prospect
+        // 1. Fetch live order header
         const liveOrder = await getSalesOrderHeader(orderNumber);
-        if (!liveOrder) return res.json({ status: 'order_not_found', orderNumber });
+        if (!liveOrder) return res.status(200).json({ status: 'not_found', orderNumber });
 
-        // 2. Resolve Email
+        // 2. Resolve Contact Email
         let contactEmail = null;
         let contactId = liveOrder.ContactId || liveOrder.CreatedContact;
         
@@ -62,6 +58,7 @@ const handleSalesWebhook = async (req, res) => {
             contactEmail = con?.Email || con?.email || null;
         }
 
+        // Fallback to Quote lookup if email still missing
         if (!contactEmail && (liveOrder.QuoteId || quoteIdInput)) {
             const qId = liveOrder.QuoteId || quoteIdInput;
             const prospect = getProspectClient();
@@ -76,13 +73,12 @@ const handleSalesWebhook = async (req, res) => {
             } catch (e) {}
         }
 
-        if (!contactEmail) return res.json({ status: 'no_email_found', orderNumber });
+        if (!contactEmail) return res.status(200).json({ status: 'no_email', orderNumber });
 
-        // 3. Fetch Lines
-        const actualQuoteId = liveOrder.QuoteId || quoteIdInput;
-        const lines = await getOrderLines(actualQuoteId);
+        // 3. Fetch Line Items
+        const lines = await getOrderLines(liveOrder.QuoteId || quoteIdInput);
         
-        // 4. Map verified Prospect fields
+        // 4. Transform and Push
         const orderInfo = {
             orderNumber: orderNumber,
             orderDate:   liveOrder.OrderDate || new Date().toISOString(),
@@ -101,7 +97,8 @@ const handleSalesWebhook = async (req, res) => {
         });
 
     } catch (err) {
-        return res.json({ status: 'exception', error: err.message });
+        console.error('[Sales Handler Exception]:', err.message);
+        return res.status(500).json({ status: 'error', message: err.message });
     }
 };
 
