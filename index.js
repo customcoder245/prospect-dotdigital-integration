@@ -58,7 +58,7 @@ app.get('/sync/suppressed', handleSuppressionSync);
 app.get('/sync/bulk-prospect', handleBulkSync);
 
 // ── DEBUG: Test SalesOrderHeaders API connectivity & Manual Sync ────────────
-app.get('/test/sales-api', async (req, res) => {
+app.get('/test/sales-force', async (req, res) => {
     const { getProspectClient } = require('./services/prospect');
     const { handleSalesWebhook } = require('./handlers/salesSync');
     
