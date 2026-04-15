@@ -7,10 +7,6 @@ const { getDotdigitalClient } = require('../services/dotdigital');
 const pushSaleToInsightData = async (contactEmail, orderInfo, orderLines) => {
     const client = getDotdigitalClient();
 
-    try {
-        await client.post('/insightData/v3/collections/Orders?collectionScope=contact&collectionType=orders');
-    } catch (e) {}
-
     const productsArray = orderLines.map(line => ({
         sku:   line.StockCode || line.ProductCode || 'N/A',
         name:  line.Description || line.ProductCode || 'Product',
@@ -30,11 +26,11 @@ const pushSaleToInsightData = async (contactEmail, orderInfo, orderLines) => {
 
     try {
         await client.put(`/insightData/v3/contacts/email/${contactEmail}/Orders/${orderInfo.orderNumber}`, orderRecord);
-        console.log(`✅ Success: Full Order ${orderInfo.orderNumber} pushed to Dotdigital for ${contactEmail}`);
+        console.log(`✅ Success: Sent Order ${orderInfo.orderNumber} to ${contactEmail}`);
         return { success: true };
     } catch (e) {
         const errorMsg = e.response?.data?.message || e.response?.data || e.message;
-        console.error(`❌ v3 PUT failed for ${orderInfo.orderNumber}:`, errorMsg);
+        console.error(`❌ v3 PUT failed:`, errorMsg);
         return { success: false, error: errorMsg };
     }
 };
@@ -50,23 +46,48 @@ const handleSalesWebhook = async (req, res) => {
 
         if (!orderNumber) return res.json({ status: 'no_order_id' });
 
-        console.log(`[Trace] Syncing Order: ${orderNumber}`);
-
-        // 1. Fetch FULL Order Header from Prospect (Reliable Source)
+        // 1. Fetch FULL Order Header from Prospect
         const liveOrder = await getSalesOrderHeader(orderNumber);
-        if (!liveOrder) return res.json({ status: 'order_not_found_in_prospect', orderNumber });
+        if (!liveOrder) return res.json({ status: 'order_not_found', orderNumber });
 
-        // 2. Resolve Contact Email
-        const contactId = liveOrder.ContactId || liveOrder.CreatedContact;
+        // 2. Aggressive Email Resolution
         let contactEmail = null;
+        
+        // Try ContactId from Live Order
+        const contactId = liveOrder.ContactId || liveOrder.CreatedContact;
         if (contactId) {
             const con = await getContact(contactId);
-            contactEmail = con?.Email || con?.email;
+            contactEmail = con?.Email || con?.email || null;
         }
 
-        if (!contactEmail) return res.json({ status: 'no_email', orderNumber });
+        // Try QuoteId fallback if email still missing
+        if (!contactEmail && (liveOrder.QuoteId || quoteIdInput)) {
+            const qId = liveOrder.QuoteId || quoteIdInput;
+            const prospect = getProspectClient();
+            try {
+                const qRes = await prospect.get(`/Quotes(QuoteId=${qId})`);
+                const qData = qRes.data.value ? qRes.data.value[0] : qRes.data;
+                const qContactId = qData.ContactId || qData.CreatedContact;
+                if (qContactId) {
+                    const con = await getContact(qContactId);
+                    contactEmail = con?.Email || con?.email || null;
+                }
+            } catch (e) {}
+        }
 
-        // 3. Fetch Order Lines using the correct QuoteId from the live order
+        // Final verification
+        if (!contactEmail) {
+            return res.json({ 
+                status: 'no_email_found', 
+                orderNumber, 
+                diagnostics: {
+                    orderContactId: contactId,
+                    orderQuoteId: liveOrder.QuoteId
+                }
+            });
+        }
+
+        // 3. Fetch Order Lines
         const actualQuoteId = liveOrder.QuoteId || quoteIdInput;
         const lines = await getOrderLines(actualQuoteId);
         
@@ -74,7 +95,7 @@ const handleSalesWebhook = async (req, res) => {
         const orderInfo = {
             orderNumber: orderNumber,
             orderDate:   liveOrder.OrderDate || new Date().toISOString(),
-            grossValue:  liveOrder.GrossTotal || liveOrder.GrossValue || 0,
+            grossValue:  liveOrder.GrossTotal || 0,
             netValue:    liveOrder.NetTotal || 0,
             currency:    liveOrder.CurrencyCode || 'AUD',
             orderStatus: liveOrder.OrderStatusDescription || 'Processed'
@@ -83,14 +104,14 @@ const handleSalesWebhook = async (req, res) => {
         const result = await pushSaleToInsightData(contactEmail, orderInfo, lines);
         return res.json({ 
             status: result.success ? 'ok' : 'error', 
-            message: result.error,
             contact: contactEmail,
-            orderId: orderNumber 
+            orderId: orderNumber,
+            message: result.error
         });
 
     } catch (err) {
-        console.error('Final Sales Error:', err.message);
-        return res.json({ status: 'error', message: err.message });
+        console.error('Sales Sync Exception:', err.message);
+        return res.json({ status: 'exception', error: err.message });
     }
 };
 
