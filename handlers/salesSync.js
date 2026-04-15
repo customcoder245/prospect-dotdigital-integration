@@ -1,13 +1,18 @@
 const { getProspectClient, getOrderLines, getContact } = require('../services/prospect');
 const { getDotdigitalClient } = require('../services/dotdigital');
 
+// ─────────────────────────────────────────────
+// Push Insight Data to Dotdigital (Valid v3 PUT)
+// ─────────────────────────────────────────────
 const pushSaleToInsightData = async (contactEmail, orderInfo, orderLines) => {
     const client = getDotdigitalClient();
 
+    // 1. Ensure the "Orders" collection exists (v3)
     try {
         await client.post('/insightData/v3/collections/Orders?collectionScope=contact&collectionType=orders');
     } catch (e) {}
 
+    // 2. Prepare the order record
     const productsArray = orderLines.map(line => ({
         sku:   line.ProductCode || line.StockCode || 'N/A',
         name:  line.Description || line.ProductCode || 'Product',
@@ -26,15 +31,16 @@ const pushSaleToInsightData = async (contactEmail, orderInfo, orderLines) => {
     };
 
     try {
-        await client.post(`/insightData/v3/records`, {
-            collectionName: 'Orders',
-            contactIdentifier: contactEmail,
-            key: orderInfo.orderNumber,
-            json: JSON.stringify(orderRecord)
-        });
+        // 3. CORRECT v3 PUT ENDPOINT
+        // Format: /insightData/v3/contacts/email/{email}/{collection}/{id}
+        const url = `/insightData/v3/contacts/email/${contactEmail}/Orders/${orderInfo.orderNumber}`;
+        await client.put(url, orderRecord);
+        
+        console.log(`✅ Success: Full Order ${orderInfo.orderNumber} pushed via v3 to ${contactEmail}`);
         return { success: true };
     } catch (e) {
         const errorMsg = e.response?.data?.message || e.response?.data || e.message;
+        console.error(`❌ v3 PUT failed for ${orderInfo.orderNumber}:`, errorMsg);
         return { success: false, error: errorMsg };
     }
 };
@@ -44,6 +50,7 @@ const handleSalesWebhook = async (req, res) => {
         const entity = req.body.createdEntity || req.body.updatedEntity || {};
         const orderNumber = entity.orderNumber || entity.OrderNumber;
         const quoteId = entity.quoteId || entity.QuoteId;
+
         if (!orderNumber) return res.json({ status: 'no_order' });
 
         const prospect = getProspectClient();
@@ -51,7 +58,7 @@ const handleSalesWebhook = async (req, res) => {
         if (quoteId) {
             try {
                 const qRes = await prospect.get(`/Quotes(QuoteId=${quoteId})`);
-                const actualData = qRes.data.value ? (qRes.data.value.find(q => q.QuoteId == quoteId) || qRes.data.value[0]) : qRes.data;
+                const actualData = qRes.data.value ? qRes.data.value.find(q => q.QuoteId == quoteId) || qRes.data.value[0] : qRes.data;
                 contactId = actualData.ContactId || actualData.CreatedContact || null;
             } catch (e) {}
         }
