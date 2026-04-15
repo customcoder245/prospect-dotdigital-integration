@@ -96,18 +96,41 @@ const handleSalesWebhook = async (req, res) => {
 
         console.log(`Processing sale: ${orderNumber} (${opco})`);
 
-        // Build order info from webhook payload (avoid extra API call)
+        // Build basic order info from webhook payload
         const orderInfo = {
             orderNumber:  orderNumber,
-            orderDate:    entity.orderDate   || entity.OrderDate   || new Date().toISOString(),
-            grossValue:   entity.grossValue  || entity.GrossValue  || 0,
-            netValue:     entity.netValue    || entity.NetValue    || 0,
-            orderStatus:  entity.statusflag  || entity.StatusFlag  || entity.orderStatus || ''
+            orderDate:    entity.orderDate  || entity.OrderDate  || new Date().toISOString(),
+            grossValue:   entity.grossValue || entity.GrossValue || 0,
+            netValue:     entity.netValue   || entity.NetValue   || 0,
+            orderStatus:  entity.statusflag || entity.StatusFlag || entity.orderStatus || ''
         };
 
-        // Get contact email
-        const contactId  = entity.contactId  || entity.ContactId  || null;
-        const divisionId = entity.divisionId || entity.DivisionId || null;
+        // The webhook createdEntity does NOT include ContactId/DivisionId.
+        // We must fetch the full order record from Prospect to get them.
+        const prospect = getProspectClient();
+        let contactId  = entity.contactId  || entity.ContactId  || null;
+        let divisionId = entity.divisionId || entity.DivisionId || null;
+
+        if (!contactId && !divisionId) {
+            try {
+                console.log(`Fetching full order details for ${orderNumber}...`);
+                const orderRes = await prospect.get(
+                    `/SalesOrderHeaders?$filter=OperatingCompanyCode eq '${opco}' and OrderNumber eq '${orderNumber}'`
+                );
+                const orderRows = orderRes.data?.value || [];
+                if (orderRows.length > 0) {
+                    contactId  = orderRows[0].ContactId  || orderRows[0].contactId  || null;
+                    divisionId = orderRows[0].DivisionId || orderRows[0].divisionId || null;
+                    console.log(`Order fetched. ContactId=${contactId}, DivisionId=${divisionId}`);
+                } else {
+                    console.log(`Order ${orderNumber} returned no rows from Prospect API.`);
+                }
+            } catch (fetchErr) {
+                console.error('Failed to fetch full order details:', fetchErr.response?.data || fetchErr.message);
+            }
+        }
+
+        // Resolve contact email from ContactId or DivisionId
         const contactEmail = await resolveContactEmail(contactId, divisionId);
 
         if (!contactEmail) {
