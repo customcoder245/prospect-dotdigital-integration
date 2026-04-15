@@ -76,6 +76,14 @@ app.get('/test/sales-force', async (req, res) => {
         results.quote_dump = r0.data;
     } catch (e) { results.quote_dump = { error: e.message }; }
 
+    // Test 0.5: Search for Contact by Name (Custom Coder)
+    try {
+        const name = req.query.name || 'Custom Coder';
+        const r05 = await client.get(`/Contacts?$filter=contains(ContactName, '${name}')`);
+        results.contact_search = r05.data;
+    } catch (e) { results.contact_search = { error: e.message }; }
+
+
     // If sync=true requested, we mock a webhook payload and call the real handler
     if (doSync) {
         console.log(`Manual Sync Triggered for ${orderNumber}`);
