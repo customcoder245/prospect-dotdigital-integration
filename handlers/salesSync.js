@@ -2,28 +2,17 @@ const { getProspectClient, getOrderLines, getContact } = require('../services/pr
 const { getDotdigitalClient } = require('../services/dotdigital');
 
 // ─────────────────────────────────────────────
-// Push Insight Data to Dotdigital (v2)
+// Push Insight Data to Dotdigital (v3 - R3 Region)
 // ─────────────────────────────────────────────
 const pushSaleToInsightData = async (contactEmail, orderInfo, orderLines) => {
     const client = getDotdigitalClient();
 
-    // 1. Ensure the Contact exists in Dotdigital (prevents 404)
-    try {
-        await client.post('/v2/contacts', {
-            Email: contactEmail,
-            OptInType: 'Unknown',
-            EmailType: 'Html'
-        });
-    } catch (e) {
-        // 409 Conflict is fine (means contact already exists)
-    }
-
-    // 2. Ensure "Orders" collection exists
+    // 1. Ensure "Orders" collection exists (v3)
     try {
         await client.post('/insightData/v3/collections/Orders?collectionScope=contact&collectionType=orders');
     } catch (e) {}
 
-    // 3. Push Line Items
+    // 2. Push Line Items
     for (const line of orderLines) {
         const sku    = line.ProductCode || line.StockCode || 'N/A';
         const lineId = line.OrderLineId || Math.random().toString(36);
@@ -40,10 +29,16 @@ const pushSaleToInsightData = async (contactEmail, orderInfo, orderLines) => {
         };
 
         try {
-            await client.post(`/v2/contacts/${contactEmail}/insight-data/Orders/${key}`, record);
-            console.log(`✅ Success: SKU ${sku} pushed for ${contactEmail}`);
+            // FIXED v3 FORMAT: Post to /records and specify collection in JSON
+            await client.post(`/insightData/v3/records`, {
+                collectionName: 'Orders',
+                contactIdentifier: contactEmail,
+                key: key,
+                json: JSON.stringify(record)
+            });
+            console.log(`✅ Success: SKU ${sku} pushed to Orders for ${contactEmail}`);
         } catch (e) {
-            console.error(`❌ Push failed for SKU ${sku}:`, e.response?.data || e.message);
+            console.error(`❌ v3 Push failed for SKU ${sku}:`, e.response?.data || e.message);
         }
     }
 };
