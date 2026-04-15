@@ -46,10 +46,12 @@ const { handleProspectWebhook } = require('./handlers/prospectWebhook');
 const { handleDotdigitalWebhook } = require('./handlers/dotdigitalWebhook');
 const { handleSuppressionSync } = require('./handlers/suppressionSync');
 const { handleBulkSync } = require('./handlers/bulkSync');
+const { handleSalesWebhook } = require('./handlers/salesSync');
 
 // Webhook Endpoints
 app.post('/webhook/prospect', handleProspectWebhook);
 app.post('/webhook/dotdigital', handleDotdigitalWebhook);
+app.post('/webhook/sales', handleSalesWebhook); // Sales History (Insight Data)
 
 // Scheduled/Manual Sync Endpoints
 app.get('/sync/suppressed', handleSuppressionSync);
