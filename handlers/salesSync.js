@@ -63,36 +63,62 @@ const handleSalesWebhook = async (req, res) => {
         }
 
         // Fetch full order details using the direct OData link from the webhook
-        // This avoids issues with composite keys in SalesOrderHeaders
+        // Note: $expand=Contact is NOT used as it may not be supported on all endpoints
         const prospect = getProspectClient();
-        let orderResponse;
+        let orderData;
 
-        if (body.entityODataLink) {
-            // Use the exact URL provided by the webhook (most reliable)
-            console.log(`Fetching order from: ${body.entityODataLink}`);
-            orderResponse = await prospect.get(body.entityODataLink + '?$expand=Contact');
-        } else {
-            // Fallback: use the orderNumber from the entity
-            const orderNumber = entity.orderNumber || entity.OrderNumber;
-            const opco = entity.operatingCompanyCode || entity.OperatingCompanyCode || 'A';
-            console.log(`Fetching order: OperatingCompanyCode=${opco}, OrderNumber=${orderNumber}`);
-            orderResponse = await prospect.get(
-                `/SalesOrderHeaders(OperatingCompanyCode=${opco},OrderNumber=${orderNumber})?$expand=Contact`
-            );
+        try {
+            let orderResponse;
+            if (body.entityODataLink) {
+                console.log(`Fetching order from: ${body.entityODataLink}`);
+                orderResponse = await prospect.get(body.entityODataLink);
+            } else {
+                const orderNumber = entity.orderNumber || entity.OrderNumber;
+                const opco = entity.operatingCompanyCode || entity.OperatingCompanyCode || 'A';
+                orderResponse = await prospect.get(
+                    `/SalesOrderHeaders(OperatingCompanyCode=${opco},OrderNumber=${orderNumber})`
+                );
+            }
+            orderData = orderResponse.data;
+            console.log('Order data fetched successfully. Keys:', Object.keys(orderData).join(', '));
+        } catch (fetchErr) {
+            console.error('Failed to fetch order details:', fetchErr.response?.data || fetchErr.message);
+            return;
         }
 
-        const orderData = orderResponse.data;
+        // Try to get contact email from order, then Contact, then Division
+        let contactEmail = orderData.Email || orderData.ContactEmail;
 
-        // Get the contact email from the expanded Contact data
-        const contactEmail = orderData.Contact?.Email || orderData.ContactEmail || orderData.Email;
+        if (!contactEmail && orderData.ContactId) {
+            try {
+                const { getContact } = require('../services/prospect');
+                const contact = await getContact(orderData.ContactId);
+                contactEmail = contact.Email;
+                console.log(`Found email via ContactId: ${contactEmail}`);
+            } catch (e) {
+                console.error('Failed to fetch Contact:', e.message);
+            }
+        }
+
+        if (!contactEmail && orderData.DivisionId) {
+            try {
+                const { getDivision } = require('../services/prospect');
+                const division = await getDivision(orderData.DivisionId);
+                contactEmail = division.Email || division.ContactEmail;
+                console.log(`Found email via DivisionId: ${contactEmail}`);
+            } catch (e) {
+                console.error('Failed to fetch Division:', e.message);
+            }
+        }
+
         if (!contactEmail) {
-            console.log(`No email found for order ${orderId}. Skipping Dotdigital sync.`);
+            console.log(`No email found for order ${orderId}. OrderData keys: ${Object.keys(orderData).join(', ')}`);
             return;
         }
 
         // Validate email format
         if (!contactEmail.includes('@') || !contactEmail.includes('.')) {
-            console.log(`Invalid email '${contactEmail}' for order ${orderId}. Skipping.`);
+            console.log(`Invalid email '${contactEmail}' for order. Skipping.`);
             return;
         }
 
