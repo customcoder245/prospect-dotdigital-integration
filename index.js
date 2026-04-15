@@ -13,43 +13,40 @@ app.get('/health', async (req, res) => {
   const ddClient = getDotdigitalClient();
   const diagnostics = {};
 
-  // 1. Diagnostics: Try to LIST all collections again
+  // 1. Diagnostics: List all collections
   try {
     const listRes = await ddClient.get('/insightData/v3/collections');
     diagnostics.current_collections = listRes.data;
   } catch (e) { diagnostics.current_collections = { error: e.message }; }
 
-  // 2. Diagnostics: FORCE Create "orders" collection
-  try {
-    const createRes = await ddClient.post('/insightData/v3/collections/orders?collectionScope=contact&collectionType=orders');
-    diagnostics.create_orders_result = createRes.data || 'Success (200 OK)';
-  } catch (e) { 
-    diagnostics.create_orders_result = { 
-        status: e.response?.status, 
-        message: e.message, 
-        data: e.response?.data 
-    }; 
-  }
-
-  // 3. Diagnostics: Get "Orders" Schema
+  // 2. Diagnostics: Get "Orders" Schema
   try {
     const schemaRes = await ddClient.get('/insightData/v3/collections/Orders/schema');
     diagnostics.orders_schema = schemaRes.data;
   } catch (e) { diagnostics.orders_schema = { error: e.message }; }
 
-  // 4. If order is provided, run the sync!
+  // 3. If order is provided, run the sync!
   if (req.query.order) {
     const { handleSalesWebhook } = require('./handlers/salesSync');
+    
+    // We wrap this to capture the error details
+    let errorDetails = null;
     const mockReq = { body: { createdEntity: { orderNumber: req.query.order, quoteId: req.query.quoteId } } };
     const mockRes = { 
-        status: (code) => diagnostics.sync_status_code = code,
-        json: (data) => diagnostics.sync_result = data
+        status: (code) => { diagnostics.sync_status_code = code; return { json: (d) => diagnostics.sync_result = d }; },
+        json: (data) => { diagnostics.sync_result = data; }
     };
-    await handleSalesWebhook(mockReq, mockRes);
-    return res.json({ status: 'ok', diagnostics });
+
+    try {
+        await handleSalesWebhook(mockReq, mockRes);
+    } catch (e) {
+        diagnostics.sync_exception = e.message;
+    }
+    
+    return res.json({ status: 'diagnostic_run', diagnostics });
   }
 
-  res.json({ status: 'ok', version: '5.0.0-DIAGNOSTICS', diagnostics });
+  res.json({ status: 'ok', version: '5.1.0-ERROR-CAPTURE', diagnostics });
 });
 
 // Import rest of handlers
