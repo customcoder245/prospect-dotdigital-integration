@@ -64,7 +64,17 @@ app.get('/test/sales-api', async (req, res) => {
     
     const orderNumber = req.query.order || 'SO-00085223';
     const opco = req.query.opco || 'A';
+    const qId  = req.query.quoteId || '13858';
     const doSync = req.query.sync === 'true';
+
+    const client = getProspectClient();
+    const results = {};
+
+    // Test 0: Get FULL Quote data for inspection
+    try {
+        const r0 = await client.get(`/Quotes(QuoteId=${qId})`);
+        results.quote_dump = r0.data;
+    } catch (e) { results.quote_dump = { error: e.message }; }
 
     // If sync=true requested, we mock a webhook payload and call the real handler
     if (doSync) {
