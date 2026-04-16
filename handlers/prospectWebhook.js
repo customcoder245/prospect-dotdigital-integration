@@ -11,7 +11,7 @@ const handleProspectWebhook = async (req, res) => {
         const entityType = payload.entityType;
         
         if (entityType === 'Contact') {
-            const contactData = payload.updatedEntity || payload.newEntity || payload.entity || payload;
+            const contactData = payload.createdEntity || payload.updatedEntity || payload.newEntity || payload.entity || payload;
             
             // Prevent infinite loop: skip sync if ONLY EmailFlag/OptIn changed
             const updatedFields = payload.updatedFields || [];
