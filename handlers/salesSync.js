@@ -79,23 +79,21 @@ const handleSalesWebhook = async (req, res) => {
             } catch (e) {}
         }
 
-        // Strategy C: UNLEASHED Table Fallback (The Missing Link for your CRM)
+        // Strategy C: UNLEASHED Table DIRECT EMAIL lookup (The Winner!)
         if (!contactEmail && liveOrder.AccountsId) {
             try {
                 const opCode = liveOrder.OperatingCompanyCode || 'A';
-                console.log(`[Prospect] Searching UnleashedContacts table for ${opCode}/${liveOrder.AccountsId}...`);
+                console.log(`[Prospect] Fetching direct email from UnleashedContacts for ${opCode}/${liveOrder.AccountsId}...`);
                 const unleashed = await getUnleashedContact(opCode, liveOrder.AccountsId);
-                const mainContactId = unleashed.MainContactId || unleashed.MainContact;
-                if (mainContactId) {
-                    const con = await getContact(mainContactId);
-                    contactEmail = con?.Email || con?.email || null;
-                }
+                // Use the DIRECT Email property from the Unleashed record
+                contactEmail = unleashed.Email || unleashed.email || null;
+                if (contactEmail) console.log(`[Prospect] Found Unleashed Email: ${contactEmail}`);
             } catch (e) {
-                console.log(`[Prospect] Unleashed lookup failed for ${liveOrder.orderNumber}`);
+                console.log(`[Prospect] Unleashed lookup failed: ${e.message}`);
             }
         }
 
-        // Strategy D: Search ANY Contact at the Company
+        // Strategy D: Search ANY Contact fallback
         if (!contactEmail) {
             try {
                 const accId = liveOrder.AccountsId;
@@ -105,7 +103,6 @@ const handleSalesWebhook = async (req, res) => {
                 else if (divId) filter = `DivisionId eq ${divId}`;
 
                 if (filter) {
-                    console.log(`[Prospect] Search Strategy D: Running deep filter search...`);
                     const searchRes = await prospect.get(`/Contacts?$filter=${filter} and email ne null&$top=1`);
                     const foundContact = searchRes.data.value ? searchRes.data.value[0] : null;
                     if (foundContact) {
@@ -116,15 +113,14 @@ const handleSalesWebhook = async (req, res) => {
         }
 
         if (!contactEmail) {
-            console.log(`[Prospect] ⚠️ Email missing for Order ${orderNumber} after all 4 sync strategies.`);
+            console.log(`[Prospect] ⚠️ All sync strategies failed for Order ${orderNumber}.`);
             return res.status(200).json({ status: 'no_email', orderNumber });
         }
 
         // 3. Fetch Line Items
-        const actualQuoteId = liveOrder.QuoteId || quoteIdInput;
-        const lines = await getOrderLines(actualQuoteId);
+        const lines = await getOrderLines(liveOrder.QuoteId || quoteIdInput);
         
-        // 4. Transform and Push
+        // 4. Map Header Data
         const orderInfo = {
             orderNumber: orderNumber,
             orderDate:   liveOrder.OrderDate || new Date().toISOString(),
