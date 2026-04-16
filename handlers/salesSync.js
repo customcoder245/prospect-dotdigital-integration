@@ -79,30 +79,31 @@ const handleSalesWebhook = async (req, res) => {
             } catch (e) {}
         }
 
-        // Strategy C: UNLEASHED Table DIRECT EMAIL lookup (The Winner!)
+        // Strategy C: UNLEASHED Table DIRECT EMAIL lookup (Requires GUID prefix)
         if (!contactEmail && liveOrder.AccountsId) {
             try {
                 const opCode = liveOrder.OperatingCompanyCode || 'A';
-                console.log(`[Prospect] Fetching direct email from UnleashedContacts for ${opCode}/${liveOrder.AccountsId}...`);
+                console.log(`[Prospect] Fetching email from UnleashedContacts for ${opCode}/${liveOrder.AccountsId}...`);
                 const unleashed = await getUnleashedContact(opCode, liveOrder.AccountsId);
-                // Use the DIRECT Email property from the Unleashed record
-                contactEmail = unleashed.Email || unleashed.email || null;
+                contactEmail = unleashed?.Email || unleashed?.email || null;
                 if (contactEmail) console.log(`[Prospect] Found Unleashed Email: ${contactEmail}`);
             } catch (e) {
                 console.log(`[Prospect] Unleashed lookup failed: ${e.message}`);
             }
         }
 
-        // Strategy D: Search ANY Contact fallback
+        // Strategy D: Last Resort Search
         if (!contactEmail) {
             try {
                 const accId = liveOrder.AccountsId;
                 const divId = liveOrder.DivisionId;
                 let filter = "";
-                if (accId) filter = `AccountsId eq '${accId}'`;
+                // Use guid'...' prefix for string-based IDs
+                if (accId) filter = `AccountsId eq guid'${accId}'`;
                 else if (divId) filter = `DivisionId eq ${divId}`;
 
                 if (filter) {
+                    console.log(`[Prospect] Search Strategy D: Running GUID search...`);
                     const searchRes = await prospect.get(`/Contacts?$filter=${filter} and email ne null&$top=1`);
                     const foundContact = searchRes.data.value ? searchRes.data.value[0] : null;
                     if (foundContact) {
@@ -113,7 +114,7 @@ const handleSalesWebhook = async (req, res) => {
         }
 
         if (!contactEmail) {
-            console.log(`[Prospect] ⚠️ All sync strategies failed for Order ${orderNumber}.`);
+            console.log(`[Prospect] ⚠️ Email discovery failed for Order ${orderNumber}.`);
             return res.status(200).json({ status: 'no_email', orderNumber });
         }
 

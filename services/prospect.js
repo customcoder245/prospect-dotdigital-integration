@@ -34,7 +34,7 @@ const getContact = async (id) => {
 // Function: Get division/company details
 const getDivision = async (id) => {
     const client = getProspectClient();
-    const filter = (typeof id === 'string' && id.includes('-')) ? `DivisionId eq '${id}'` : `DivisionId eq ${id}`;
+    const filter = (typeof id === 'string' && id.includes('-')) ? `DivisionId eq guid'${id}'` : `DivisionId eq ${id}`;
     const response = await client.get(`/Divisions?$filter=${filter}`);
     return response.data?.value?.[0] || response.data;
 };
@@ -60,12 +60,13 @@ const getSalesOrderHeader = async (orderNumber) => {
     return response.data?.value?.[0] || response.data;
 };
 
-// Function: Get Unleashed Contact Record (Filter-based search)
+// Function: Get Unleashed Contact Record (The Ultimate Filter)
 const getUnleashedContact = async (opCode, accountsId) => {
     const client = getProspectClient();
-    // Using $filter for maximum compatibility across regions
-    const response = await client.get(`/UnleashedContacts?$filter=OperatingCompanyCode eq '${opCode}' and AccountsId eq '${accountsId}'`);
-    return response.data?.value?.[0] || (Array.isArray(response.data) ? response.data[0] : response.data);
+    // Added 'guid' prefix for AccountsId to match internal OData requirements
+    const filter = `OperatingCompanyCode eq '${opCode}' and AccountsId eq guid'${accountsId}'`;
+    const response = await client.get(`/UnleashedContacts?$filter=${filter}`);
+    return response.data?.value?.[0] || null;
 };
 
 module.exports = {
