@@ -24,12 +24,15 @@ const pushSaleToInsightData = async (contactEmail, orderInfo, orderLines) => {
         products:       productsArray
     };
 
+    console.log(`[Dotdigital] Pushing Order: ${orderInfo.orderNumber} for Email: ${contactEmail}`);
+
     try {
         await client.put(`/insightData/v3/contacts/email/${contactEmail}/Orders/${orderInfo.orderNumber}`, orderRecord);
+        console.log(`[Dotdigital] ✅ Success: Order ${orderInfo.orderNumber} synced.`);
         return { success: true };
     } catch (e) {
         const errorMsg = e.response?.data?.message || e.message;
-        console.error(`[Dotdigital Error] ${orderInfo.orderNumber}:`, errorMsg);
+        console.error(`[Dotdigital] ❌ Error ${orderInfo.orderNumber}:`, errorMsg);
         return { success: false, error: errorMsg };
     }
 };
@@ -43,11 +46,16 @@ const handleSalesWebhook = async (req, res) => {
         const orderNumber = entity.orderNumber || entity.OrderNumber;
         const quoteIdInput = entity.quoteId || entity.QuoteId;
 
+        console.log(`[Prospect Webhook] Received Sales Order: ${orderNumber || 'Unknown'}`);
+
         if (!orderNumber) return res.status(200).json({ status: 'ignored', reason: 'no_order_number' });
 
         // 1. Fetch live order header
         const liveOrder = await getSalesOrderHeader(orderNumber);
-        if (!liveOrder) return res.status(200).json({ status: 'not_found', orderNumber });
+        if (!liveOrder) {
+            console.log(`[Prospect] ⚠️ Order ${orderNumber} not found in CRM.`);
+            return res.status(200).json({ status: 'not_found', orderNumber });
+        }
 
         // 2. Resolve Contact Email
         let contactEmail = null;
@@ -73,7 +81,10 @@ const handleSalesWebhook = async (req, res) => {
             } catch (e) {}
         }
 
-        if (!contactEmail) return res.status(200).json({ status: 'no_email', orderNumber });
+        if (!contactEmail) {
+            console.log(`[Prospect] ⚠️ Email missing for Order ${orderNumber}.`);
+            return res.status(200).json({ status: 'no_email', orderNumber });
+        }
 
         // 3. Fetch Line Items
         const lines = await getOrderLines(liveOrder.QuoteId || quoteIdInput);
