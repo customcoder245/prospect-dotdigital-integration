@@ -7,16 +7,23 @@ const app = express();
 app.use(bodyParser.json());
 app.use(bodyParser.json({ type: 'text/json' }));
 
-// Health Check + Test Mode
+// Health Check + Test Mode (with raw data exposure)
 app.get('/health', async (req, res) => {
   if (req.query.order) {
+    const { getSalesOrderHeader, getOrderLines } = require('./services/prospect');
     const { handleSalesWebhook } = require('./handlers/salesSync');
-    const mockReq = { body: { createdEntity: { orderNumber: req.query.order } } };
-    const mockRes = { 
-        status: (code) => { return { json: (d) => res.json({ test_status: code, result: d }) }; },
-        json: (data) => res.json({ test_status: 200, result: data })
-    };
-    await handleSalesWebhook(mockReq, mockRes);
+    
+    try {
+        const liveOrder = await getSalesOrderHeader(req.query.order);
+        const mockReq = { body: { createdEntity: { orderNumber: req.query.order } } };
+        const mockRes = { 
+            status: (code) => { return { json: (d) => res.json({ test_status: code, result: d, debug_order: liveOrder }) }; },
+            json: (data) => res.json({ test_status: 200, result: data, debug_order: liveOrder })
+        };
+        await handleSalesWebhook(mockReq, mockRes);
+    } catch (e) {
+        res.json({ error: e.message });
+    }
     return;
   }
 
@@ -24,7 +31,7 @@ app.get('/health', async (req, res) => {
     status: 'ok', 
     integration: 'Prospect CRM <=> Dotdigital',
     region: 'R3',
-    version: '6.1.0-TESTING'
+    version: '6.2.0-DEBUG-IDS'
   });
 });
 
