@@ -18,14 +18,15 @@ app.get('/health', async (req, res) => {
         const liveOrder = await getSalesOrderHeader(req.query.order);
         diagnostics.debug_order = liveOrder;
         
-        if (liveOrder.AccountsId) {
+        const qId = liveOrder.QuoteId;
+        if (qId) {
             try {
-                // TRACE: Look for a Division that shares this AccountsId GUID
-                console.log(`Searching for Division with AccountsId: ${liveOrder.AccountsId}`);
-                const resDiv = await prospect.get(`/Divisions?$filter=AccountsId eq guid'${liveOrder.AccountsId}'`);
-                diagnostics.division_discovery = resDiv.data.value ? resDiv.data.value : 'Not Found';
+                // TRACE: Pull the original Quote to see linked IDs
+                console.log(`Searching for Quote: ${qId}`);
+                const resQuote = await prospect.get(`/Quotes?$filter=QuoteId eq ${qId}`);
+                diagnostics.quote_discovery = resQuote.data.value ? resQuote.data.value : resQuote.data;
             } catch (e) {
-                diagnostics.division_discovery_error = e.message;
+                diagnostics.quote_discovery_error = e.message;
             }
         }
 
@@ -41,7 +42,7 @@ app.get('/health', async (req, res) => {
     return;
   }
 
-  res.json({ status: 'ok', version: '6.9.0-DIVISION-TRACE' });
+  res.json({ status: 'ok', version: '7.0.0-QUOTE-TRACE' });
 });
 
 const { handleProspectWebhook } = require('./handlers/prospectWebhook');
