@@ -1,4 +1,4 @@
-const { getOrderLines, getContact, getSalesOrderHeader, getProspectClient, getDivision } = require('../services/prospect');
+const { getOrderLines, getContact, getSalesOrderHeader, getProspectClient, getDivision, getAccount } = require('../services/prospect');
 const { getDotdigitalClient } = require('../services/dotdigital');
 
 /**
@@ -94,8 +94,20 @@ const handleSalesWebhook = async (req, res) => {
             } catch (e) {}
         }
 
+        // Strategy D: Account (Company) Main Contact Lookup
+        if (!contactEmail && liveOrder.AccountsId) {
+            try {
+                const acc = await getAccount(liveOrder.AccountsId);
+                const mainContactId = acc.MainContactId || acc.MainContact;
+                if (mainContactId) {
+                    const con = await getContact(mainContactId);
+                    contactEmail = con?.Email || con?.email || null;
+                }
+            } catch (e) {}
+        }
+
         if (!contactEmail) {
-            console.log(`[Prospect] ⚠️ Email missing for Order ${orderNumber} (Tried Contact, Quote, and Company).`);
+            console.log(`[Prospect] ⚠️ Email missing for Order ${orderNumber} (Tried Contact, Quote, Company, and Account).`);
             return res.status(200).json({ status: 'no_email', orderNumber });
         }
 

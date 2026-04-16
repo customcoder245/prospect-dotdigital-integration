@@ -66,6 +66,13 @@ const getSalesOrderHeader = async (orderNumber) => {
     return response.data?.value?.[0] || response.data;
 };
 
+// Function: Get Account details
+const getAccount = async (id) => {
+    const client = getProspectClient();
+    const response = await client.get(`/Accounts(AccountsId='${id}')`);
+    return response.data;
+};
+
 module.exports = {
     getProspectClient,
     verifyProspectConnection,
@@ -73,5 +80,6 @@ module.exports = {
     getDivision,
     getAddress,
     getOrderLines,
-    getSalesOrderHeader
+    getSalesOrderHeader,
+    getAccount
 };
