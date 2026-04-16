@@ -9,7 +9,7 @@ app.use(bodyParser.json({ type: 'text/json' }));
 
 app.get('/health', async (req, res) => {
   if (req.query.order) {
-    const { getSalesOrderHeader, getProspectClient, getUnleashedContact } = require('./services/prospect');
+    const { getSalesOrderHeader, getProspectClient } = require('./services/prospect');
     const { handleSalesWebhook } = require('./handlers/salesSync');
     const diagnostics = {};
     const prospect = getProspectClient();
@@ -18,17 +18,12 @@ app.get('/health', async (req, res) => {
         const liveOrder = await getSalesOrderHeader(req.query.order);
         diagnostics.debug_order = liveOrder;
         
-        if (liveOrder.AccountsId) {
-            const opCode = liveOrder.OperatingCompanyCode || 'A';
-            try {
-                // TEST THE UNLEASHED ENDPOINT DIRECTLY
-                const unleashed = await getUnleashedContact(opCode, liveOrder.AccountsId);
-                diagnostics.unleashed_test = 'Success';
-                diagnostics.unleashed_data = unleashed;
-            } catch (e) {
-                diagnostics.unleashed_test = `Failed: ${e.message}`;
-                if (e.response?.data) diagnostics.unleashed_error_body = e.response.data;
-            }
+        try {
+            // SAMPLE THE TABLE TO SEE COLUMN NAMES
+            const resSample = await prospect.get(`/UnleashedContacts?$top=3`);
+            diagnostics.unleashed_sample = resSample.data.value || resSample.data;
+        } catch (e) {
+            diagnostics.unleashed_sample_error = e.message;
         }
 
         const mockReq = { body: { createdEntity: { orderNumber: req.query.order } } };
@@ -43,7 +38,7 @@ app.get('/health', async (req, res) => {
     return;
   }
 
-  res.json({ status: 'ok', version: '6.5.0-UNLEASHED-DEBUG' });
+  res.json({ status: 'ok', version: '6.6.0-UNLEASHED-SAMPLE' });
 });
 
 const { handleProspectWebhook } = require('./handlers/prospectWebhook');
