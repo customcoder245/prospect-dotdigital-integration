@@ -1,4 +1,4 @@
-const { getOrderLines, getContact, getSalesOrderHeader, getProspectClient, getDivision, getAccount } = require('../services/prospect');
+const { getOrderLines, getContact, getSalesOrderHeader, getProspectClient, getDivision, getUnleashedContact } = require('../services/prospect');
 const { getDotdigitalClient } = require('../services/dotdigital');
 
 /**
@@ -58,7 +58,7 @@ const handleSalesWebhook = async (req, res) => {
         let contactEmail = null;
         const prospect = getProspectClient();
         
-        // Strategy A: Direct Contact attached to Order
+        // Strategy A: Direct Contact on Order
         let contactId = liveOrder.ContactId || liveOrder.CreatedContact;
         if (contactId) {
             const con = await getContact(contactId);
@@ -79,20 +79,23 @@ const handleSalesWebhook = async (req, res) => {
             } catch (e) {}
         }
 
-        // Strategy C: Fetch Main Contact from the Account record (GUID lookup)
+        // Strategy C: UNLEASHED Table Fallback (The Missing Link for your CRM)
         if (!contactEmail && liveOrder.AccountsId) {
             try {
-                console.log(`[Prospect] Searching Account ${liveOrder.AccountsId} direct...`);
-                const acc = await getAccount(liveOrder.AccountsId);
-                const mainContactId = acc.MainContactId || acc.MainContact;
+                const opCode = liveOrder.OperatingCompanyCode || 'A';
+                console.log(`[Prospect] Searching UnleashedContacts table for ${opCode}/${liveOrder.AccountsId}...`);
+                const unleashed = await getUnleashedContact(opCode, liveOrder.AccountsId);
+                const mainContactId = unleashed.MainContactId || unleashed.MainContact;
                 if (mainContactId) {
                     const con = await getContact(mainContactId);
                     contactEmail = con?.Email || con?.email || null;
                 }
-            } catch (e) {}
+            } catch (e) {
+                console.log(`[Prospect] Unleashed lookup failed for ${liveOrder.orderNumber}`);
+            }
         }
 
-        // Strategy D: Last Resort Search (Filter based Search)
+        // Strategy D: Search ANY Contact at the Company
         if (!contactEmail) {
             try {
                 const accId = liveOrder.AccountsId;
@@ -102,7 +105,7 @@ const handleSalesWebhook = async (req, res) => {
                 else if (divId) filter = `DivisionId eq ${divId}`;
 
                 if (filter) {
-                    console.log(`[Prospect] Running deep search for contacts at Company/Account...`);
+                    console.log(`[Prospect] Search Strategy D: Running deep filter search...`);
                     const searchRes = await prospect.get(`/Contacts?$filter=${filter} and email ne null&$top=1`);
                     const foundContact = searchRes.data.value ? searchRes.data.value[0] : null;
                     if (foundContact) {
@@ -113,12 +116,13 @@ const handleSalesWebhook = async (req, res) => {
         }
 
         if (!contactEmail) {
-            console.log(`[Prospect] ⚠️ No email found for Order ${orderNumber} after 4 search strategies.`);
+            console.log(`[Prospect] ⚠️ Email missing for Order ${orderNumber} after all 4 sync strategies.`);
             return res.status(200).json({ status: 'no_email', orderNumber });
         }
 
         // 3. Fetch Line Items
-        const lines = await getOrderLines(liveOrder.QuoteId || quoteIdInput);
+        const actualQuoteId = liveOrder.QuoteId || quoteIdInput;
+        const lines = await getOrderLines(actualQuoteId);
         
         // 4. Transform and Push
         const orderInfo = {
