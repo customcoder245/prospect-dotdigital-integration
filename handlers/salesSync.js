@@ -1,4 +1,4 @@
-const { getOrderLines, getContact, getSalesOrderHeader, getProspectClient } = require('../services/prospect');
+const { getOrderLines, getContact, getSalesOrderHeader, getProspectClient, getDivision } = require('../services/prospect');
 const { getDotdigitalClient } = require('../services/dotdigital');
 
 /**
@@ -61,12 +61,13 @@ const handleSalesWebhook = async (req, res) => {
         let contactEmail = null;
         let contactId = liveOrder.ContactId || liveOrder.CreatedContact;
         
+        // Strategy A: Individual Contact
         if (contactId) {
             const con = await getContact(contactId);
             contactEmail = con?.Email || con?.email || null;
         }
 
-        // Fallback to Quote lookup if email still missing
+        // Strategy B: Quote Contact Lookup
         if (!contactEmail && (liveOrder.QuoteId || quoteIdInput)) {
             const qId = liveOrder.QuoteId || quoteIdInput;
             const prospect = getProspectClient();
@@ -81,8 +82,20 @@ const handleSalesWebhook = async (req, res) => {
             } catch (e) {}
         }
 
+        // Strategy C: Company (Division) Main Contact Lookup
+        if (!contactEmail && liveOrder.DivisionId) {
+            try {
+                const div = await getDivision(liveOrder.DivisionId);
+                const mainContactId = div.MainContactId || div.MainContact;
+                if (mainContactId) {
+                    const con = await getContact(mainContactId);
+                    contactEmail = con?.Email || con?.email || null;
+                }
+            } catch (e) {}
+        }
+
         if (!contactEmail) {
-            console.log(`[Prospect] ⚠️ Email missing for Order ${orderNumber}.`);
+            console.log(`[Prospect] ⚠️ Email missing for Order ${orderNumber} (Tried Contact, Quote, and Company).`);
             return res.status(200).json({ status: 'no_email', orderNumber });
         }
 
