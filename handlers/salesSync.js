@@ -52,25 +52,22 @@ const handleSalesWebhook = async (req, res) => {
 
         // 1. Fetch live order header
         const liveOrder = await getSalesOrderHeader(orderNumber);
-        if (!liveOrder) {
-            console.log(`[Prospect] ⚠️ Order ${orderNumber} not found in CRM.`);
-            return res.status(200).json({ status: 'not_found', orderNumber });
-        }
+        if (!liveOrder) return res.status(200).json({ status: 'not_found', orderNumber });
 
-        // 2. Resolve Contact Email
+        // 2. Resolve Contact Email (Aggressive Search)
         let contactEmail = null;
-        let contactId = liveOrder.ContactId || liveOrder.CreatedContact;
+        const prospect = getProspectClient();
         
-        // Strategy A: Individual Contact
+        // Strategy A: Direct Contact on Order
+        let contactId = liveOrder.ContactId || liveOrder.CreatedContact;
         if (contactId) {
             const con = await getContact(contactId);
             contactEmail = con?.Email || con?.email || null;
         }
 
-        // Strategy B: Quote Contact Lookup
+        // Strategy B: Quote Lookup
         if (!contactEmail && (liveOrder.QuoteId || quoteIdInput)) {
             const qId = liveOrder.QuoteId || quoteIdInput;
-            const prospect = getProspectClient();
             try {
                 const qRes = await prospect.get(`/Quotes(QuoteId=${qId})`);
                 const qData = qRes.data.value ? qRes.data.value[0] : qRes.data;
@@ -82,32 +79,26 @@ const handleSalesWebhook = async (req, res) => {
             } catch (e) {}
         }
 
-        // Strategy C: Company (Division) Main Contact Lookup
-        if (!contactEmail && liveOrder.DivisionId) {
+        // Strategy C & D: Search ANY Contact at the Company (LKF GROUP lookup)
+        const companyId = liveOrder.AccountsId || liveOrder.DivisionId;
+        if (!contactEmail && companyId) {
             try {
-                const div = await getDivision(liveOrder.DivisionId);
-                const mainContactId = div.MainContactId || div.MainContact;
-                if (mainContactId) {
-                    const con = await getContact(mainContactId);
-                    contactEmail = con?.Email || con?.email || null;
+                console.log(`[Prospect] Searching for any contacts at Company/Account ${companyId}...`);
+                // Find contacts where DivisionId or AccountsId matches and email is present
+                const filter = `(DivisionId eq ${companyId} or AccountsId eq '${companyId}') and email ne null`;
+                const searchRes = await prospect.get(`/Contacts?$filter=${filter}&$top=1`);
+                const foundContact = searchRes.data.value ? searchRes.data.value[0] : null;
+                if (foundContact) {
+                    contactEmail = foundContact.Email || foundContact.email;
+                    console.log(`[Prospect] Found alternate contact at company: ${contactEmail}`);
                 }
-            } catch (e) {}
-        }
-
-        // Strategy D: Account (Company) Main Contact Lookup
-        if (!contactEmail && liveOrder.AccountsId) {
-            try {
-                const acc = await getAccount(liveOrder.AccountsId);
-                const mainContactId = acc.MainContactId || acc.MainContact;
-                if (mainContactId) {
-                    const con = await getContact(mainContactId);
-                    contactEmail = con?.Email || con?.email || null;
-                }
-            } catch (e) {}
+            } catch (e) {
+                console.error(`[Prospect] Automated company contact search failed:`, e.message);
+            }
         }
 
         if (!contactEmail) {
-            console.log(`[Prospect] ⚠️ Email missing for Order ${orderNumber} (Tried Contact, Quote, Company, and Account).`);
+            console.log(`[Prospect] ⚠️ No email found for Order ${orderNumber} after searching order, quote, and company list.`);
             return res.status(200).json({ status: 'no_email', orderNumber });
         }
 
