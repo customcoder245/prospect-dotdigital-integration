@@ -18,7 +18,17 @@ app.get('/health', async (req, res) => {
         const liveOrder = await getSalesOrderHeader(req.query.order);
         diagnostics.debug_order = liveOrder;
         
-        // Final Test Call
+        if (liveOrder.AccountsId) {
+            try {
+                // TRACE: Look for a Division that shares this AccountsId GUID
+                console.log(`Searching for Division with AccountsId: ${liveOrder.AccountsId}`);
+                const resDiv = await prospect.get(`/Divisions?$filter=AccountsId eq guid'${liveOrder.AccountsId}'`);
+                diagnostics.division_discovery = resDiv.data.value ? resDiv.data.value : 'Not Found';
+            } catch (e) {
+                diagnostics.division_discovery_error = e.message;
+            }
+        }
+
         const mockReq = { body: { createdEntity: { orderNumber: req.query.order } } };
         const mockRes = { 
             status: (code) => { return { json: (d) => res.json({ test_status: code, result: d, diagnostics }) }; },
@@ -31,7 +41,7 @@ app.get('/health', async (req, res) => {
     return;
   }
 
-  res.json({ status: 'ok', version: '6.8.0-FINAL-VALIDATION' });
+  res.json({ status: 'ok', version: '6.9.0-DIVISION-TRACE' });
 });
 
 const { handleProspectWebhook } = require('./handlers/prospectWebhook');
