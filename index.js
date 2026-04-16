@@ -10,6 +10,7 @@ app.use(bodyParser.json({ type: 'text/json' }));
 app.get('/health', async (req, res) => {
   if (req.query.order) {
     const { getSalesOrderHeader, getProspectClient } = require('./services/prospect');
+    const { handleSalesWebhook } = require('./handlers/salesSync');
     const diagnostics = {};
     const prospect = getProspectClient();
     
@@ -17,20 +18,20 @@ app.get('/health', async (req, res) => {
         const liveOrder = await getSalesOrderHeader(req.query.order);
         diagnostics.debug_order = liveOrder;
         
-        // REVERSE SEARCH: Find Albert Sande to see HIS IDs
-        try {
-            const resRev = await prospect.get(`/Contacts?$filter=Forename eq 'Albert' and Surname eq 'Sande'`);
-            diagnostics.albert_discovery = resRev.data.value ? resRev.data.value : 'Not Found';
-        } catch (e) { diagnostics.albert_discovery_error = e.message; }
-
-        res.json({ diagnostics });
+        // Final Test Call
+        const mockReq = { body: { createdEntity: { orderNumber: req.query.order } } };
+        const mockRes = { 
+            status: (code) => { return { json: (d) => res.json({ test_status: code, result: d, diagnostics }) }; },
+            json: (data) => res.json({ test_status: 200, result: data, diagnostics })
+        };
+        await handleSalesWebhook(mockReq, mockRes);
     } catch (e) {
         res.json({ error: e.message });
     }
     return;
   }
 
-  res.json({ status: 'ok', version: '6.7.0-REVERSE-SEARCH' });
+  res.json({ status: 'ok', version: '6.8.0-FINAL-VALIDATION' });
 });
 
 const { handleProspectWebhook } = require('./handlers/prospectWebhook');
