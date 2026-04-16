@@ -54,8 +54,9 @@ const handleSalesWebhook = async (req, res) => {
         const liveOrder = await getSalesOrderHeader(orderNumber);
         if (!liveOrder) return res.status(200).json({ status: 'not_found', orderNumber });
 
-        // 2. Resolve Contact Email (Multi-Stage Discovery)
+        // 2. Resolve Contact Email (The Ultimate Search)
         let contactEmail = null;
+        let resolvedDivisionId = liveOrder.DivisionId;
         const prospect = getProspectClient();
         
         // Strategy A: Direct Contact on Order
@@ -65,64 +66,60 @@ const handleSalesWebhook = async (req, res) => {
             contactEmail = con?.Email || con?.email || null;
         }
 
-        // Strategy B: Trace via Quote
-        if (!contactEmail && (liveOrder.QuoteId || quoteIdInput)) {
-            const qId = liveOrder.QuoteId || quoteIdInput;
+        // Strategy B: Trace via Quote (Fetch Division link)
+        const qId = liveOrder.QuoteId || quoteIdInput;
+        if (!contactEmail && qId) {
             try {
-                const qRes = await prospect.get(`/Quotes(QuoteId=${qId})`);
-                const qData = qRes.data.value ? qRes.data.value[0] : qRes.data;
+                console.log(`[Prospect] Searching Quote ${qId} for Division/Contact...`);
+                const qRes = await prospect.get(`/Quotes?$filter=QuoteId eq ${qId}`);
+                const qData = qRes.data.value?.[0] || qRes.data;
+                
+                // Try finding contact directly on quote
                 const qContactId = qData.ContactId || qData.CreatedContact;
                 if (qContactId) {
                     const con = await getContact(qContactId);
                     contactEmail = con?.Email || con?.email || null;
                 }
-            } catch (e) {}
-        }
 
-        // Strategy C: UNLEASHED Table search via SalesLedgerId (The Hidden Key!)
-        if (!contactEmail && liveOrder.SalesLedgerId) {
-            try {
-                const ledgerId = liveOrder.SalesLedgerId;
-                console.log(`[Prospect] Searching UnleashedContacts via SalesLedgerId guid'${ledgerId}'...`);
-                const searchRes = await prospect.get(`/UnleashedContacts?$filter=SalesLedgerId eq guid'${ledgerId}' and Email ne null&$top=1`);
-                const found = searchRes.data.value ? searchRes.data.value[0] : null;
-                if (found) {
-                    contactEmail = found.Email || found.email;
-                    console.log(`[Prospect] Found Email via SalesLedger: ${contactEmail}`);
-                }
-            } catch (e) {
-                console.log(`[Prospect] SalesLedger lookup failed: ${e.message}`);
-            }
-        }
-
-        // Strategy D: Search via AccountsId/DivisionId
-        if (!contactEmail) {
-            try {
-                const accId = liveOrder.AccountsId;
-                const divId = liveOrder.DivisionId;
-                let filter = "";
-                if (accId) filter = `AccountsId eq guid'${accId}'`;
-                else if (divId) filter = `DivisionId eq ${divId}`;
-
-                if (filter) {
-                    const searchRes = await prospect.get(`/Contacts?$filter=${filter} and email ne null&$top=1`);
-                    const foundContact = searchRes.data.value ? searchRes.data.value[0] : null;
-                    if (foundContact) {
-                        contactEmail = foundContact.Email || foundContact.email;
-                    }
+                // If no contact, grab the DivisionId from the quote (Important for business orders!)
+                if (!contactEmail && qData.DivisionId) {
+                    resolvedDivisionId = qData.DivisionId;
+                    console.log(`[Prospect] Resolved DivisionId from Quote: ${resolvedDivisionId}`);
                 }
             } catch (e) {}
         }
 
+        // Strategy C: Search ANY Contact at the DivisionId (The Albert Sande path)
+        if (!contactEmail && resolvedDivisionId) {
+            try {
+                console.log(`[Prospect] Searching for any contacts at Division ${resolvedDivisionId}...`);
+                const searchRes = await prospect.get(`/Contacts?$filter=DivisionId eq ${resolvedDivisionId} and Email ne null&$top=1`);
+                const foundContact = searchRes.data.value?.[0];
+                if (foundContact) {
+                    contactEmail = foundContact.Email || foundContact.email;
+                    console.log(`[Prospect] Found Division Contact: ${contactEmail}`);
+                }
+            } catch (e) {}
+        }
+
+        // Strategy D: Unleashed/GUID Fallback
+        if (!contactEmail && liveOrder.AccountsId) {
+            try {
+                const opCode = liveOrder.OperatingCompanyCode || 'A';
+                const unleashed = await getUnleashedContact(opCode, liveOrder.AccountsId);
+                contactEmail = unleashed?.Email || unleashed?.email || null;
+            } catch (e) {}
+        }
+
         if (!contactEmail) {
-            console.log(`[Prospect] ⚠️ All lookup strategies failed for Order ${orderNumber}.`);
+            console.log(`[Prospect] ⚠️ Email discovery failed for Order ${orderNumber}.`);
             return res.status(200).json({ status: 'no_email', orderNumber });
         }
 
         // 3. Fetch Line Items
-        const lines = await getOrderLines(liveOrder.QuoteId || quoteIdInput);
+        const lines = await getOrderLines(qId);
         
-        // 4. Map Header Data
+        // 4. Map and Push
         const orderInfo = {
             orderNumber: orderNumber,
             orderDate:   liveOrder.OrderDate || new Date().toISOString(),
