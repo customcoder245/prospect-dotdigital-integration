@@ -60,12 +60,12 @@ const getSalesOrderHeader = async (orderNumber) => {
     return response.data?.value?.[0] || response.data;
 };
 
-// Function: Get Unleashed Contact/Account Record (The missing link!)
+// Function: Get Unleashed Contact Record (Filter-based search)
 const getUnleashedContact = async (opCode, accountsId) => {
     const client = getProspectClient();
-    // Format: /UnleashedContacts('A', 'GUID')
-    const response = await client.get(`/UnleashedContacts('${opCode}', '${accountsId}')`);
-    return response.data;
+    // Using $filter for maximum compatibility across regions
+    const response = await client.get(`/UnleashedContacts?$filter=OperatingCompanyCode eq '${opCode}' and AccountsId eq '${accountsId}'`);
+    return response.data?.value?.[0] || (Array.isArray(response.data) ? response.data[0] : response.data);
 };
 
 module.exports = {
