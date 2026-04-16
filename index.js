@@ -7,18 +7,33 @@ const app = express();
 app.use(bodyParser.json());
 app.use(bodyParser.json({ type: 'text/json' }));
 
-// Health Check + Test Mode (with raw data exposure)
 app.get('/health', async (req, res) => {
   if (req.query.order) {
-    const { getSalesOrderHeader, getOrderLines } = require('./services/prospect');
+    const { getSalesOrderHeader, getAccount, getProspectClient } = require('./services/prospect');
     const { handleSalesWebhook } = require('./handlers/salesSync');
+    const diagnostics = {};
     
     try {
         const liveOrder = await getSalesOrderHeader(req.query.order);
+        diagnostics.debug_order = liveOrder;
+        
+        if (liveOrder.AccountsId) {
+            try {
+                const acc = await getAccount(liveOrder.AccountsId);
+                diagnostics.debug_account = acc;
+                
+                const prospect = getProspectClient();
+                const contactsRes = await prospect.get(`/Contacts?$filter=AccountsId eq '${liveOrder.AccountsId}'`);
+                diagnostics.debug_contacts = contactsRes.data.value || contactsRes.data;
+            } catch (e) {
+                diagnostics.debug_account_error = e.message;
+            }
+        }
+
         const mockReq = { body: { createdEntity: { orderNumber: req.query.order } } };
         const mockRes = { 
-            status: (code) => { return { json: (d) => res.json({ test_status: code, result: d, debug_order: liveOrder }) }; },
-            json: (data) => res.json({ test_status: 200, result: data, debug_order: liveOrder })
+            status: (code) => { return { json: (d) => res.json({ test_status: code, result: d, diagnostics }) }; },
+            json: (data) => res.json({ test_status: 200, result: data, diagnostics })
         };
         await handleSalesWebhook(mockReq, mockRes);
     } catch (e) {
@@ -27,12 +42,7 @@ app.get('/health', async (req, res) => {
     return;
   }
 
-  res.json({ 
-    status: 'ok', 
-    integration: 'Prospect CRM <=> Dotdigital',
-    region: 'R3',
-    version: '6.2.0-DEBUG-IDS'
-  });
+  res.json({ status: 'ok', version: '6.3.0-DEEP-DEBUG' });
 });
 
 const { handleProspectWebhook } = require('./handlers/prospectWebhook');
