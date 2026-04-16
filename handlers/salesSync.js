@@ -79,31 +79,32 @@ const handleSalesWebhook = async (req, res) => {
             } catch (e) {}
         }
 
-        // Strategy C: UNLEASHED Table DIRECT EMAIL lookup (Requires GUID prefix)
-        if (!contactEmail && liveOrder.AccountsId) {
+        // Strategy C: UNLEASHED Table search via SalesLedgerId (The Hidden Key!)
+        if (!contactEmail && liveOrder.SalesLedgerId) {
             try {
-                const opCode = liveOrder.OperatingCompanyCode || 'A';
-                console.log(`[Prospect] Fetching email from UnleashedContacts for ${opCode}/${liveOrder.AccountsId}...`);
-                const unleashed = await getUnleashedContact(opCode, liveOrder.AccountsId);
-                contactEmail = unleashed?.Email || unleashed?.email || null;
-                if (contactEmail) console.log(`[Prospect] Found Unleashed Email: ${contactEmail}`);
+                const ledgerId = liveOrder.SalesLedgerId;
+                console.log(`[Prospect] Searching UnleashedContacts via SalesLedgerId guid'${ledgerId}'...`);
+                const searchRes = await prospect.get(`/UnleashedContacts?$filter=SalesLedgerId eq guid'${ledgerId}' and Email ne null&$top=1`);
+                const found = searchRes.data.value ? searchRes.data.value[0] : null;
+                if (found) {
+                    contactEmail = found.Email || found.email;
+                    console.log(`[Prospect] Found Email via SalesLedger: ${contactEmail}`);
+                }
             } catch (e) {
-                console.log(`[Prospect] Unleashed lookup failed: ${e.message}`);
+                console.log(`[Prospect] SalesLedger lookup failed: ${e.message}`);
             }
         }
 
-        // Strategy D: Last Resort Search
+        // Strategy D: Search via AccountsId/DivisionId
         if (!contactEmail) {
             try {
                 const accId = liveOrder.AccountsId;
                 const divId = liveOrder.DivisionId;
                 let filter = "";
-                // Use guid'...' prefix for string-based IDs
                 if (accId) filter = `AccountsId eq guid'${accId}'`;
                 else if (divId) filter = `DivisionId eq ${divId}`;
 
                 if (filter) {
-                    console.log(`[Prospect] Search Strategy D: Running GUID search...`);
                     const searchRes = await prospect.get(`/Contacts?$filter=${filter} and email ne null&$top=1`);
                     const foundContact = searchRes.data.value ? searchRes.data.value[0] : null;
                     if (foundContact) {
@@ -114,7 +115,7 @@ const handleSalesWebhook = async (req, res) => {
         }
 
         if (!contactEmail) {
-            console.log(`[Prospect] ⚠️ Email discovery failed for Order ${orderNumber}.`);
+            console.log(`[Prospect] ⚠️ All lookup strategies failed for Order ${orderNumber}.`);
             return res.status(200).json({ status: 'no_email', orderNumber });
         }
 
